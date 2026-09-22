@@ -60,7 +60,11 @@ Thus the network satisfies both boundary values exactly, and \(\rho\) has the
 desired first-order normalization on either boundary component.  The
 `naive_product` comparison retains the same lift but uses \(d_A d_B\), which
 has exact boundary values without that normalization.  The `penalty` baseline
-is an ordinary MLP trained with sampled boundary penalties.
+is an unconstrained-output MLP trained with sampled boundary penalties.  All
+three neural networks use the periodic input embedding
+\((\sin(2\pi x_1),\sin(2\pi x_2),\cos(2\pi x_1),\cos(2\pi x_2))\), so the
+network output itself is exactly torus-periodic rather than merely being
+trained on a periodic geometry.
 
 ## Why this is a useful first committor case
 
