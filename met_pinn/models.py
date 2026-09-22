@@ -54,3 +54,27 @@ class BoundaryFactorPINN(nn.Module):
         rho = self.boundary_factor(x)
         # All current exact-boundary problems sample within their closed domain.
         return rho.clamp_min(0.0).pow(self.exponent) * self.network(x)
+
+
+class LiftedBoundaryFactorPINN(nn.Module):
+    """``u(x)=g(x)+rho(x)N(x)`` for non-homogeneous Dirichlet data.
+
+    ``g`` supplies the boundary values and ``rho`` vanishes on every Dirichlet
+    component.  Keeping the lifting and factor as explicit callables makes the
+    architecture useful for multiply-connected problems without baking a
+    particular PDE geometry into the network implementation.
+    """
+
+    def __init__(
+        self,
+        network: MLP,
+        lifting: Callable[[torch.Tensor], torch.Tensor],
+        boundary_factor: Callable[[torch.Tensor], torch.Tensor],
+    ):
+        super().__init__()
+        self.network = network
+        self.lifting = lifting
+        self.boundary_factor = boundary_factor
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.lifting(x) + self.boundary_factor(x) * self.network(x)
