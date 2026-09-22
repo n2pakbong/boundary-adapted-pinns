@@ -83,6 +83,12 @@ def _checkpoint_payload(
     }
 
 
+def _cpu_model_state(model: torch.nn.Module) -> dict[str, torch.Tensor]:
+    """Copy parameters for an evaluation checkpoint without GPU storage."""
+
+    return {name: value.detach().cpu().clone() for name, value in model.state_dict().items()}
+
+
 def run_ou_boundary_factor(
     config: OUBoundaryFactorConfig,
     run_dir: Path,
@@ -129,7 +135,8 @@ def run_ou_boundary_factor(
         gamma=float(config.training.get("lr_gamma", 1.0)),
     )
 
-    start_epoch, best_loss = 1, float("inf")
+    start_epoch, best_loss, best_epoch = 1, float("inf"), 0
+    best_model_state: dict[str, torch.Tensor] | None = None
     last_path = run_dir / "last.pt"
     if resume:
         if not last_path.exists():
@@ -141,6 +148,9 @@ def run_ou_boundary_factor(
         restore_rng_state(checkpoint["rng_state"])
         start_epoch = int(checkpoint["epoch"]) + 1
         best_loss = float(checkpoint["best_loss"])
+        best_checkpoint = torch.load(run_dir / "best.pt", map_location="cpu", weights_only=False)
+        best_model_state = best_checkpoint["model_state"]
+        best_epoch = int(best_checkpoint["epoch"])
 
     epochs = int(config.training["epochs"])
     collocation_points = int(config.training["collocation_points"])
@@ -173,17 +183,10 @@ def run_ou_boundary_factor(
 
             if loss_value < best_loss:
                 best_loss = loss_value
-                atomic_torch_save(
-                    _checkpoint_payload(
-                        epoch=epoch,
-                        model=model,
-                        optimizer=optimizer,
-                        scheduler=scheduler,
-                        best_loss=best_loss,
-                    ),
-                    run_dir / "best.pt",
-                )
-            if epoch % checkpoint_every == 0 or epoch == epochs:
+                best_epoch = epoch
+                best_model_state = _cpu_model_state(model)
+            checkpoint_due = epoch == 1 or epoch % checkpoint_every == 0 or epoch == epochs
+            if checkpoint_due:
                 atomic_torch_save(
                     _checkpoint_payload(
                         epoch=epoch,
@@ -194,6 +197,16 @@ def run_ou_boundary_factor(
                     ),
                     last_path,
                 )
+                if best_model_state is not None:
+                    atomic_torch_save(
+                        {
+                            "epoch": best_epoch,
+                            "model_state": best_model_state,
+                            "best_loss": best_loss,
+                            "checkpoint_kind": "evaluation_best",
+                        },
+                        run_dir / "best.pt",
+                    )
 
 
 @dataclass(frozen=True)
@@ -289,7 +302,8 @@ def run_periodic_committor(
         optimizer, gamma=float(config.training.get("lr_gamma", 1.0))
     )
 
-    start_epoch, best_loss = 1, float("inf")
+    start_epoch, best_loss, best_epoch = 1, float("inf"), 0
+    best_model_state: dict[str, torch.Tensor] | None = None
     last_path = run_dir / "last.pt"
     if resume:
         if not last_path.exists():
@@ -301,6 +315,9 @@ def run_periodic_committor(
         restore_rng_state(checkpoint["rng_state"])
         start_epoch = int(checkpoint["epoch"]) + 1
         best_loss = float(checkpoint["best_loss"])
+        best_checkpoint = torch.load(run_dir / "best.pt", map_location="cpu", weights_only=False)
+        best_model_state = best_checkpoint["model_state"]
+        best_epoch = int(best_checkpoint["epoch"])
 
     epochs = int(config.training["epochs"])
     collocation_points = int(config.training["collocation_points"])
@@ -350,17 +367,10 @@ def run_periodic_committor(
 
             if loss_value < best_loss:
                 best_loss = loss_value
-                atomic_torch_save(
-                    _checkpoint_payload(
-                        epoch=epoch,
-                        model=model,
-                        optimizer=optimizer,
-                        scheduler=scheduler,
-                        best_loss=best_loss,
-                    ),
-                    run_dir / "best.pt",
-                )
-            if epoch % checkpoint_every == 0 or epoch == epochs:
+                best_epoch = epoch
+                best_model_state = _cpu_model_state(model)
+            checkpoint_due = epoch == 1 or epoch % checkpoint_every == 0 or epoch == epochs
+            if checkpoint_due:
                 atomic_torch_save(
                     _checkpoint_payload(
                         epoch=epoch,
@@ -371,3 +381,13 @@ def run_periodic_committor(
                     ),
                     last_path,
                 )
+                if best_model_state is not None:
+                    atomic_torch_save(
+                        {
+                            "epoch": best_epoch,
+                            "model_state": best_model_state,
+                            "best_loss": best_loss,
+                            "checkpoint_kind": "evaluation_best",
+                        },
+                        run_dir / "best.pt",
+                    )
