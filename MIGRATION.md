@@ -14,3 +14,11 @@ Every new long run must write a self-contained directory containing:
 - the best checkpoint (`best.pt`).
 
 No result is treated as a paper result until its configuration, seed, validation rule, and code revision are recorded.
+
+## Validation status of this initial commit
+
+The source files compile and the JSON configuration has been checked. The
+execution environment used to create this branch has neither PyTorch nor
+pytest, so the OU unit tests and smoke run have not been executed here. They
+are required checks in a Colab runtime before this scaffold is used for a
+scientific run.
