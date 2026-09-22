@@ -1,6 +1,6 @@
 import torch
 
-from met_pinn.models import LiftedBoundaryFactorPINN, MLP
+from met_pinn.models import LiftedBoundaryFactorPINN, MLP, PeriodicMLP
 from met_pinn.problems import PeriodicTwoWellCommittor
 
 
@@ -15,6 +15,13 @@ def test_periodic_geometry_is_invariant_under_integer_shifts() -> None:
     assert torch.allclose(problem.source_factor(x), problem.source_factor(shifted))
     assert torch.allclose(problem.target_factor(x), problem.target_factor(shifted))
     assert torch.allclose(problem.lifting(x), problem.lifting(shifted))
+
+
+def test_periodic_network_is_invariant_under_integer_shifts() -> None:
+    network = PeriodicMLP(MLP(input_dim=4, width=8, depth=2)).to(dtype=torch.float64)
+    x = torch.tensor([[0.11, 0.92], [0.68, 0.14]], dtype=torch.float64)
+    shifted = x + torch.tensor([1.0, -2.0], dtype=torch.float64)
+    assert torch.allclose(network(x), network(shifted))
 
 
 def test_boundary_samples_satisfy_periodic_level_set() -> None:
