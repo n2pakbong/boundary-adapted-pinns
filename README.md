@@ -14,6 +14,9 @@ The current rebuild work is on `rebuild/committor-ready-core`.
 - The first new problem is a periodic-domain committor with two interior
   Dirichlet components; its mathematical specification is in
   [`docs/periodic_committor.md`](docs/periodic_committor.md).
+- The runnable Colab handoff is
+  [openable directly in Colab](https://colab.research.google.com/github/n2pakbong/boundary-adapted-pinns/blob/rebuild/committor-ready-core/colab/periodic_committor.ipynb): it saves
+  checkpoints, finite-difference data, summaries, and figures to Google Drive.
 
 `MIGRATION.md` records the boundary between preserved legacy material and the new code.
 
