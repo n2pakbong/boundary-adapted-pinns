@@ -13,7 +13,7 @@ import numpy as np
 import torch
 
 from .checkpointing import atomic_torch_save, restore_rng_state, rng_state, write_json
-from .models import BoundaryFactorPINN, LiftedBoundaryFactorPINN, MLP
+from .models import BoundaryFactorPINN, LiftedBoundaryFactorPINN, MLP, PeriodicMLP
 from .problems import OUDiskProblem, PeriodicTwoWellCommittor
 
 
@@ -213,9 +213,9 @@ class PeriodicCommittorConfig:
         return cls(**json.loads(path.read_text(encoding="utf-8")))
 
 
-def _initialize_mlp(model_config: dict[str, Any]) -> MLP:
+def _initialize_mlp(model_config: dict[str, Any], *, input_dim: int = 2) -> MLP:
     base = MLP(
-        input_dim=2,
+        input_dim=input_dim,
         width=int(model_config["width"]),
         depth=int(model_config["depth"]),
         activation=str(model_config.get("activation", "tanh")),
@@ -230,7 +230,7 @@ def _initialize_mlp(model_config: dict[str, Any]) -> MLP:
 def _build_periodic_committor_model(
     config: PeriodicCommittorConfig, problem: PeriodicTwoWellCommittor
 ) -> torch.nn.Module:
-    base = _initialize_mlp(config.model)
+    base = PeriodicMLP(_initialize_mlp(config.model, input_dim=4))
     if config.method == "boundary_adapted":
         return LiftedBoundaryFactorPINN(base, problem.lifting, problem.boundary_adapted_factor)
     if config.method == "naive_product":
