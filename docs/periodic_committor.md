@@ -83,18 +83,25 @@ claims an alanine-dipeptide result.
 
 ## Running and validating
 
-Install in Colab, then run each configuration from the repository root:
+For the complete three-method comparison, open
+[`colab/periodic_committor.ipynb`](../colab/periodic_committor.ipynb) in Colab,
+choose a GPU, and use **Runtime → Run all**.  The notebook writes every result
+to Google Drive and supplies a resume cell for an interrupted runtime.
+
+The underlying command is also available for a non-notebook environment:
 
 ```bash
 pip install -e '.[dev]'
-met-pinn configs/periodic_committor/boundary_adapted_smoke.json \
-  --run-dir runs/periodic_committor/boundary_adapted_smoke
+met-pinn-periodic-comparison configs/periodic_committor/overnight_comparison.json \
+  --output-dir runs/periodic_committor/overnight
 ```
 
-Each run writes `config.json`, `metadata.json`, `metrics.jsonl`, `best.pt`, and
-`last.pt`; `last.pt` includes optimizer, scheduler, and random-number state for
-an unattended restart.  Add `--resume` with the same run directory to continue
-from `last.pt`.
+The comparison runs the boundary-adapted, naive-product, and penalty methods;
+then saves `committor_*.png`, `losses.png`, `summary.json`, and the reference
+grid as well as each method's `config.json`, `metadata.json`, `metrics.jsonl`,
+`best.pt`, and `last.pt`. `last.pt` includes optimizer, scheduler, and
+random-number state for an unattended restart. Add `--resume` with the same
+output directory to continue from `last.pt`.
 
 `met_pinn.reference.solve_periodic_committor_fd` provides a low-dimensional
 central-difference comparator.  It is *not* a declared ground truth: run at
