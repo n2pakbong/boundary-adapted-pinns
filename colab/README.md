@@ -1,12 +1,10 @@
 # Colab use
 
-The experiment runner is deliberately notebook-independent. In a fresh Colab runtime, after cloning the branch, install the package and run a named configuration:
+Open [`periodic_committor.ipynb`](periodic_committor.ipynb) in Colab, choose a
+GPU runtime, and use **Runtime → Run all**. It installs the branch, tests it,
+runs the full three-method periodic-committor comparison, and saves checkpoints,
+reference data, summaries, and figures in Google Drive.
 
-```bash
-pip install -e '.[dev]'
-met-pinn configs/ou_disk/boundary_factor_smoke.json --run-dir artifacts/ou_smoke
-```
-
-To resume after an interruption, rerun the same command with `--resume`. The run directory contains the configuration, metadata, append-only metrics, `last.pt`, and `best.pt`.
-
-The smoke configuration uses CPU and is only a wiring check. GPU configurations and paper-scale budgets will be added only after the OU validation protocol is agreed.
+The notebook prints the exact Drive run directory before training. If Colab
+disconnects, reopen the notebook, rerun its installation cell, copy that
+directory into the supplied resume cell, and run the command with `--resume`.
