@@ -34,12 +34,25 @@ class MLP(nn.Module):
         return self.network(x).squeeze(-1)
 
 
+class PeriodicMLP(nn.Module):
+    """An MLP composed with a sine/cosine embedding of the unit torus."""
+
+    def __init__(self, network: MLP):
+        super().__init__()
+        self.network = network
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        phase = 2.0 * torch.pi * x
+        features = torch.cat((torch.sin(phase), torch.cos(phase)), dim=-1)
+        return self.network(features)
+
+
 class BoundaryFactorPINN(nn.Module):
     """``u(x)=rho(x)^exponent N(x)`` with a supplied boundary factor ``rho``."""
 
     def __init__(
         self,
-        network: MLP,
+        network: nn.Module,
         boundary_factor: Callable[[torch.Tensor], torch.Tensor],
         exponent: float = 1.0,
     ):
@@ -67,7 +80,7 @@ class LiftedBoundaryFactorPINN(nn.Module):
 
     def __init__(
         self,
-        network: MLP,
+        network: nn.Module,
         lifting: Callable[[torch.Tensor], torch.Tensor],
         boundary_factor: Callable[[torch.Tensor], torch.Tensor],
     ):
