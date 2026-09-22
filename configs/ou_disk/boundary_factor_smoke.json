@@ -1,0 +1,25 @@
+{
+  "seed": 20260922,
+  "device": "cpu",
+  "dtype": "float64",
+  "problem": {
+    "radius": 2.0,
+    "theta": 1.0,
+    "sigma": 1.0
+  },
+  "model": {
+    "width": 16,
+    "depth": 2,
+    "activation": "tanh",
+    "gain": 1.0,
+    "boundary_exponent": 1.0
+  },
+  "training": {
+    "epochs": 20,
+    "collocation_points": 64,
+    "learning_rate": 0.001,
+    "lr_gamma": 1.0,
+    "checkpoint_every": 5,
+    "log_every": 1
+  }
+}
