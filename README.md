@@ -11,7 +11,9 @@ The current rebuild work is on `rebuild/committor-ready-core`.
 - The original OU, double-well, and Duffing notebooks remain at the repository root as historical experiment records.
 - `met_pinn/` contains the new reusable implementation; its first target is the two-dimensional OU disk benchmark.
 - Double-well and Duffing are not being migrated at this stage.
-- The next new problem is planned to be a periodic-domain committor problem. It has not yet been specified or implemented.
+- The first new problem is a periodic-domain committor with two interior
+  Dirichlet components; its mathematical specification is in
+  [`docs/periodic_committor.md`](docs/periodic_committor.md).
 
 `MIGRATION.md` records the boundary between preserved legacy material and the new code.
 
@@ -47,6 +49,8 @@ Every new run writes its configuration, runtime metadata, append-only metrics, a
 | `configs/` | Versioned configurations for individual runs. |
 | `tests/` | Mathematical and implementation-level checks. |
 | `colab/` | Colab usage notes. |
+| `docs/periodic_committor.md` | Periodic committor problem, comparisons, and reference-grid protocol. |
+| `references.bib` | Bibliography for research material cited by the new experiments. |
 | `legacy/` | Provenance index for unchanged historical notebooks. |
 | `OU_process*`, `Double_Well_2D`, `Duffin_oscillator` | Preserved legacy notebooks and embedded outputs. |
 
