@@ -1,7 +1,7 @@
 import torch
 
-from met_pinn.models import BoundaryFactorPINN, MLP
-from met_pinn.problems import OUDiskProblem
+from boundary_pinn.models import BoundaryFactorPINN, MLP
+from boundary_pinn.problems.mean_escape_time import OUDiskProblem
 
 
 def test_boundary_factor_has_unit_first_order_normalisation() -> None:

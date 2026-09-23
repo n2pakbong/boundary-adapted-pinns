@@ -1,4 +1,4 @@
-"""Shared code for reproducible mean-exit-time and committor PINN experiments."""
+"""Neural-network tools and PDE benchmarks for boundary-adapted PINNs."""
 
 from .models import BoundaryFactorPINN, LiftedBoundaryFactorPINN, MLP, PeriodicMLP
 

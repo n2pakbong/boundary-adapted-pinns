@@ -1,7 +1,7 @@
 import torch
 
-from met_pinn.models import LiftedBoundaryFactorPINN, MLP, PeriodicMLP
-from met_pinn.problems import PeriodicTwoWellCommittor
+from boundary_pinn.models import LiftedBoundaryFactorPINN, MLP, PeriodicMLP
+from boundary_pinn.problems.committor import PeriodicTwoWellCommittor
 
 
 def _problem() -> PeriodicTwoWellCommittor:

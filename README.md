@@ -1,59 +1,63 @@
-# Boundary-adapted PINNs
+# Boundary-adapted PINNs for elliptic PDEs
 
-Research code for boundary-adapted neural networks on elliptic PDEs, motivated by mean escape time problems. The repository contains both the original paper experiment notebooks and a newer Python implementation. The committor is one example; it is not the scope of the repository.
+This repository studies neural approximations for elliptic partial differential equations with Dirichlet boundary conditions. It accompanies [Boundary-Adapted PINNs for Elliptic Dirichlet Problems: H²(Ω) A Priori Error Bounds with Application to Mean Escape Time Computation](https://arxiv.org/abs/2607.19167).
 
-## Start here
+The paper applies the method to mean escape time equations for an Ornstein–Uhlenbeck process in a ball and a two-dimensional double-well system. The original experiment notebooks include the derivations, explanations, references, training procedures, and result plots used in those studies. A periodic two-well committor is included as a separate example of a multiply connected Dirichlet problem.
 
-| If you want to… | Open… |
+## Navigate the repository
+
+| Topic | Location |
 |---|---|
-| Find the maintained Python implementation | `met_pinn/` |
-| See the source notebooks for the 2026 paper experiments | `OU_process_2D/Models/` and `Double_Well_2D/Models/` |
-| Run the newer periodic committor example in Colab | `colab/periodic_committor.ipynb` |
-| Find the PDE definitions used by the newer implementation | `met_pinn/problems/` |
+| Shared neural architectures and numerical utilities | `src/boundary_pinn/` |
+| Mean escape time equations and examples | `src/boundary_pinn/problems/mean_escape_time/` |
+| Committor equations and examples | `src/boundary_pinn/problems/committor/` |
+| Source notebooks for the OU-ball paper comparison | `experiments/mean_escape_time/ou_ball/notebooks/` |
+| Source notebooks for the double-well paper comparison | `experiments/mean_escape_time/double_well/notebooks/` |
+| Earlier OU parameter and training studies | `experiments/mean_escape_time/ou_process/` |
+| Periodic two-well committor example | `experiments/committor/periodic_two_well/` and `colab/periodic_committor.ipynb` |
+| Duffing oscillator first-passage studies | `experiments/first_passage/duffing_oscillator/` |
+| Figures and error-table notebooks for the paper | `experiments/mean_escape_time/paper_results/` |
 
-## Paper experiment source
+The `[FINAL]` OU-ball and double-well notebooks are preserved as the source records for the paper's comparisons. The additional double-well conjugate-gradient optimizer notebook and the distinct medium-size OU study are also retained. Earlier OU and Duffing experiments remain available as separate scientific material. Notebook Markdown, derivations, citations, code, and saved outputs have been kept with the notebooks.
 
-The paper's numerical section studies an Ornstein–Uhlenbeck process in a ball and a two-dimensional double-well process. It compares standard, variational, over-enforced, under-enforced, and boundary-adapted PINNs. The original notebooks for these runs are kept in the problem folders above; they are the source record for the paper experiments.
+## Python implementation
 
-- `OU_process_2D/Models/` contains the five OU method notebooks marked `[FINAL]`.
-- `Double_Well_2D/Models/` contains the five double-well method notebooks marked `[FINAL]`. The additional `boundary_adapted_engd_cg.ipynb` records a distinct optimizer variant and is retained.
-- `error_tables.ipynb` turns saved OU and double-well metrics into LaTeX tables. It expects `ou.txt` and `dw.txt` in its working directory.
-- `plots.ipynb` is a small image-cropping helper for comparing prediction and reference panels.
-
-The `[WIP]` double-well notebooks were drafts superseded by the corresponding `[FINAL]` notebooks and have been removed. The empty `exponential_pinn.ipynb` placeholder and empty Duffing placeholder files have also been removed.
-
-`OU_process/` contains earlier OU parameter and curriculum experiments. `Duffin_oscillator/` contains a separate first-passage example. They are retained as distinct research material; neither is the current committor workflow.
-
-## Maintained Python implementation
-
-- `met_pinn/models.py`: neural architectures, including exact boundary-factor ansatzes.
-- `met_pinn/problems/`: PDE operators, domain geometry, boundary data, and sampling for the current OU disk and periodic committor implementations.
-- `met_pinn/training.py`: their training loops and restartable checkpoints.
-- `met_pinn/periodic_comparison.py`: the complete periodic committor comparison, reference calculation, metrics, and figures.
-- `met_pinn/reference.py`: the committor finite-difference reference solver.
-- `met_pinn/cli.py`: the OU disk prototype command-line runner.
-- `configs/`: versioned run settings; the periodic committor has one CPU preflight and one GPU pilot.
-- `tests/`: tests for the current Python implementations.
-
-This Python implementation is the starting point for future PDE work, not yet a general solver for arbitrary PDEs. Its training code still has problem-specific paths. For a new PDE, define the operator, domain, boundary conditions, and sampling in `met_pinn/problems/`; add a reference or validation method, a configuration under `configs/<problem>/`, and tests under `tests/`. Then connect it to the runner. The aim is to reuse the network, optimization, checkpointing, and plotting machinery instead of copying a full notebook for each PDE or method.
-
-## Run the periodic committor example
-
-Open the [Colab notebook from `main`](https://colab.research.google.com/github/n2pakbong/boundary-adapted-pinns/blob/main/colab/periodic_committor.ipynb). Run setup, then the CPU preflight if this code version has not been checked, then the GPU pilot. Setup uses the saved `GITHUB_TOKEN` Colab Secret only to clone the private repository in a fresh runtime. The resume cell is only for a pilot interrupted before completion.
-
-The CPU preflight runs the complete small pipeline without GPU computation. The GPU pilot trains three committor methods for 6,000 epochs each and saves results to Google Drive. This pilot is not a paper-scale result.
-
-## Local checks
-
-With Python 3.10 or later:
+Install the package and its test dependencies in a Python 3.10+ environment:
 
 ```bash
 pip install -e '.[dev]'
 pytest -q
 ```
 
-These tests cover the current Python code. Each new PDE still needs its own mathematical validation and reference checks.
+The package name is `boundary-pinn`; its import name is `boundary_pinn`. Shared network architectures and checkpoint utilities live at the package root. Problem definitions are grouped by equation type. Experiment-specific training and validation code remains identifiable with the problem it studies.
+
+The current Python examples are an Ornstein–Uhlenbeck mean escape time problem on a disk and a periodic two-well committor. The code does not yet provide a turnkey solver for arbitrary PDEs. New PDE studies can reuse the shared architectures and numerical utilities while adding their own operator, domain, boundary conditions, experiment settings, tests, and reference solution.
+
+## Running the periodic committor example
+
+The complete notebook explains each stage and saves results to Google Drive:
+
+[`colab/periodic_committor.ipynb`](colab/periodic_committor.ipynb)
+
+The CPU preflight exercises the full training, reference, checkpoint, and plotting pipeline with tiny settings. It does not use a GPU and is a wiring check. The GPU pilot is a separate cell in the same notebook and runs only when started explicitly.
+
+For a local CPU preflight:
+
+```bash
+periodic-committor experiments/committor/periodic_two_well/configs/preflight_comparison_cpu.json \
+  --output-dir runs/periodic_committor/preflight
+```
+
+For larger runs, edit or copy a versioned configuration and choose a result directory outside the source tree. Each run records its configuration, code revision, metrics, checkpoints, reference data, and figures. The finite-difference reference is checked at multiple grid resolutions; it is a numerical comparator whose convergence should be examined before interpreting errors.
+
+When this repository is private, the Colab notebook uses a `GITHUB_TOKEN` Colab Secret to fetch the source from GitHub. That token is only for repository access; it is not used for training or Google Drive. Public access to the repository removes the need for a token.
+
+## Citation
+
+If this repository supports your work, cite the accompanying paper:
+
+> N. Pakbong, “Boundary-Adapted PINNs for Elliptic Dirichlet Problems: H²(Ω) A Priori Error Bounds with Application to Mean Escape Time Computation,” 2026. [arXiv:2607.19167](https://arxiv.org/abs/2607.19167).
 
 ## License
 
-MIT; see `LICENSE`.
+MIT; see [LICENSE](LICENSE).

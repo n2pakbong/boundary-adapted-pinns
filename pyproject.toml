@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "met-pinn"
-version = "0.1.0"
-description = "Reproducible PINN experiments for elliptic first-passage boundary-value problems"
+name = "boundary-pinn"
+version = "0.2.0"
+description = "Boundary-adapted neural networks for elliptic PDEs"
 requires-python = ">=3.10"
 dependencies = [
   "matplotlib>=3.7",
@@ -18,11 +18,15 @@ dependencies = [
 dev = ["pytest>=8"]
 
 [project.scripts]
-met-pinn = "met_pinn.cli:main"
-met-pinn-periodic-comparison = "met_pinn.periodic_comparison:main"
+boundary-pinn = "boundary_pinn.cli:main"
+periodic-committor = "boundary_pinn.experiments.committor.periodic_two_well.comparison:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
+[tool.setuptools]
+package-dir = {"" = "src"}
+
 [tool.setuptools.packages.find]
-include = ["met_pinn*"]
+where = ["src"]
+include = ["boundary_pinn*"]
