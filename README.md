@@ -18,7 +18,7 @@ The paper applies the method to mean escape time equations for an Ornstein–Uhl
 | Duffing oscillator first-passage studies | `experiments/first_passage/duffing_oscillator/` |
 | Figures and error-table notebooks for the paper | `experiments/mean_escape_time/paper_results/` |
 
-The OU-ball and double-well paper comparisons each retain five method notebooks: standard, variational, over-enforced, under-enforced, and boundary-adapted PINNs. The `paper_results/` folder contains the figure and error-table notebooks. The earlier OU-process collection keeps one standard-PINN example, one boundary-fitted-PINN example, and its parameter-influence visualization. The Duffing collection keeps its boundary-adapted and penalty PINNs, a FEniCSx reference solver, and distinct result and parameter visualizations.
+The OU-ball and double-well paper comparisons each retain five method notebooks: standard, variational, over-enforced, under-enforced, and boundary-adapted PINNs. The `paper_results/` folder contains the figure and error-table notebooks. The earlier OU-process studies retain a standard-PINN example, a boundary-fitted-PINN example, and parameter-influence plots. Duffing oscillator first-passage experiments, including neural-network, finite-element, trajectory, and parameter studies, remain under `experiments/first_passage/duffing_oscillator/`.
 
 ## Python implementation
 

@@ -1,3 +1,3 @@
 # Duffing oscillator first-passage experiments
 
-This collection includes boundary-adapted and penalty PINN examples, a FEniCSx finite-element reference solver, and separate trajectory, solution, and parameter visualizations. It illustrates first-passage computations for a Duffing oscillator, distinct from the paper's mean escape time comparisons.
+This collection contains neural-network and finite-element studies of first-passage behavior for a Duffing oscillator, with parameter, trajectory, and solution plots. It is a separate example from the OU mean escape time and periodic committor studies.
