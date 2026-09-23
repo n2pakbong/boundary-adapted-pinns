@@ -15,8 +15,10 @@ The current rebuild work is on `rebuild/committor-ready-core`.
   Dirichlet components; its mathematical specification is in
   [`docs/periodic_committor.md`](docs/periodic_committor.md).
 - The runnable Colab handoff is
-  [openable directly in Colab](https://colab.research.google.com/github/n2pakbong/boundary-adapted-pinns/blob/rebuild/committor-ready-core/colab/periodic_committor.ipynb): it saves
+  [openable directly in Colab](https://colab.research.google.com/github/n2pakbong/boundary-adapted-pinns/blob/committor-colab/colab/periodic_committor.ipynb): it saves
   checkpoints, finite-difference data, summaries, and figures to Google Drive.
+  `committor-colab` is a slash-free alias of the rebuild branch because Colab
+  cannot parse a branch name containing `/` in this URL format.
 
 `MIGRATION.md` records the boundary between preserved legacy material and the new code.
 
