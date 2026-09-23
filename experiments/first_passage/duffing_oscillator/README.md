@@ -1,3 +1,9 @@
-# Duffing oscillator first-passage experiments
+# Duffing oscillator first-passage example
 
-This collection contains neural-network and finite-element studies of first-passage behavior for a Duffing oscillator, with parameter, trajectory, and solution plots. It is a separate example from the OU mean escape time and periodic committor studies.
+The retained notebooks cover three complementary parts of this problem:
+
+- `notebooks/boundary_pinn.ipynb`: the Duffing first-passage equation and boundary-adapted PINN.
+- `notebooks/penalty_pinn.ipynb`: a PINN baseline that adds a residual penalty.
+- `plots/Duffing_Oscillator_plot.ipynb`: sample trajectories of the Duffing diffusion.
+
+The training notebooks include the model formulation and explanatory material. They accompany a first-passage problem, distinct from the paper's mean escape time examples.
