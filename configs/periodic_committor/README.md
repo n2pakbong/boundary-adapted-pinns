@@ -1,23 +1,19 @@
 # Periodic committor configurations
 
-The three smoke configurations differ only in their treatment of the two
-Dirichlet components:
+## Run order
 
-- `boundary_adapted_smoke.json`: exact boundary lift plus the normalized
-  two-component first-order factor.
-- `naive_product_smoke.json`: the same lift with an unnormalized product
-  factor.  It has exact values but is the deliberately weaker ablation.
-- `penalty_smoke.json`: an unconstrained network with sampled boundary-loss
-  penalties.
+1. `preflight_comparison_cpu.json` runs the complete three-method pipeline on CPU: reference solve, training, checkpoints, summary, and figures. It is deliberately tiny (two epochs) and establishes that the full command works without spending GPU time. It is not a scientific result.
+2. `overnight_comparison.json` is the first GPU pilot: three methods, 6,000 epochs each, and 128/256-grid references. Run it only after the CPU preflight completes successfully.
+3. A later paper configuration should be created only after inspecting this pilot's runtime, reference-grid discrepancy, and numerical error.
 
-Run each from a fresh Colab runtime after installing the project:
+The individual `*_smoke.json` files test each architecture in isolation. They are retained for development; ordinary users should use the CPU preflight followed by the GPU pilot.
+
+The preflight command is:
 
 ```bash
-met-pinn configs/periodic_committor/boundary_adapted_smoke.json \
-  --run-dir runs/periodic_committor/boundary_adapted_smoke
+met-pinn-periodic-comparison \
+  configs/periodic_committor/preflight_comparison_cpu.json \
+  --output-dir runs/periodic_committor/preflight
 ```
 
-The smoke files check wiring and restart artifacts only.  Before reporting a
-comparison, copy them to a named paper configuration, increase training length,
-record the Colab hardware/runtime details, and perform the reference-grid
-convergence check described in `docs/periodic_committor.md`.
+The runner writes the exact configuration, metadata, JSONL metrics, `last.pt`/ `best.pt` checkpoints, reference data, `summary.json`, and figures in the output directory.
