@@ -249,12 +249,63 @@ def run_periodic_comparison(config_path: Path, output_dir: Path, *, resume: bool
     print(f"Comparison complete: {output_dir}", flush=True)
 
 
+
+def audit_saved_boundaries(output_dir: Path) -> Path:
+    """Check true boundary values of saved best checkpoints, using the CPU only."""
+    raw = json.loads((output_dir / "comparison_config.json").read_text(encoding="utf-8"))
+    problem = PeriodicTwoWellCommittor(**raw["problem"])
+    dtype = _dtype(str(raw["dtype"]))
+    device = torch.device("cpu")
+    methods: dict[str, dict[str, float]] = {}
+    for method in raw["methods"]:
+        config = PeriodicCommittorConfig(
+            seed=int(raw["seed"]),
+            device="cpu",
+            dtype=str(raw["dtype"]),
+            method=method,
+            problem=raw["problem"],
+            model=raw["model"],
+            training=raw["training"],
+        )
+        model = _build_periodic_committor_model(config, problem).to(device=device, dtype=dtype)
+        checkpoint = torch.load(
+            output_dir / method / "best.pt", map_location=device, weights_only=False
+        )
+        model.load_state_dict(checkpoint["model_state"])
+        methods[method] = _boundary_rmse(model, problem, device=device, dtype=dtype)
+        print(f"Checked {method} boundaries on CPU.", flush=True)
+
+    metadata_path = output_dir / "comparison_metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8")) if metadata_path.is_file() else {}
+    destination = output_dir / "boundary_diagnostics.json"
+    write_json(destination, {
+        "points_per_boundary": 512,
+        "sample_seed": 0,
+        "training_git_revision": metadata.get("git_revision"),
+        "audit_git_revision": _git_revision(),
+        "methods": methods,
+    })
+    print(f"Boundary diagnostics saved: {destination}", flush=True)
+    return destination
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run and plot the periodic committor comparison.")
-    parser.add_argument("config", type=Path, help="Comparison JSON configuration")
+    parser.add_argument("config", type=Path, nargs="?", help="Comparison JSON configuration for training")
     parser.add_argument("--output-dir", type=Path, required=True, help="Directory for checkpoints, data, and figures")
     parser.add_argument("--resume", action="store_true", help="Resume methods with an existing last.pt")
+    parser.add_argument(
+        "--audit-boundaries", action="store_true",
+        help="Check saved best.pt models at the true boundaries using the CPU; never train",
+    )
     args = parser.parse_args()
+    if args.audit_boundaries:
+        if args.resume or args.config is not None:
+            parser.error("--audit-boundaries uses only --output-dir")
+        audit_saved_boundaries(args.output_dir)
+        return
+    if args.config is None:
+        parser.error("config is required for training")
     run_periodic_comparison(args.config, args.output_dir, resume=args.resume)
 
 

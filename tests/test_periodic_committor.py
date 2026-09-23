@@ -107,6 +107,15 @@ def test_periodic_comparison_cpu_smoke(tmp_path, capsys) -> None:
         assert (output_dir / method / "last.pt").is_file()
         assert (output_dir / method / "best.pt").is_file()
     assert (output_dir / "losses.png").is_file()
+    from boundary_pinn.experiments.committor.periodic_two_well.comparison import (
+        audit_saved_boundaries,
+    )
+    audit_path = audit_saved_boundaries(output_dir)
+    audit = json.loads(audit_path.read_text(encoding="utf-8"))
+    assert set(audit["methods"]) == set(config["methods"])
+    for method in ("boundary_adapted", "naive_product"):
+        assert audit["methods"][method]["source_boundary_rmse"] < 1e-8
+        assert audit["methods"][method]["target_boundary_rmse"] < 1e-8
     captured = capsys.readouterr().out
     for method in config["methods"]:
         assert f"{method}: epoch 1/1" in captured
