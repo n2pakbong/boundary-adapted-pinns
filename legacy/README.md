@@ -1,5 +1,9 @@
-# Legacy material
+# Earlier research notebooks
 
-The repository-root notebooks and outputs are preserved unchanged on this branch. They are the source record for the existing mean-escape-time paper experiments.
+This directory contains notes about older experiment folders; it is not the maintained Python implementation.
 
-This directory is an index, not a copied second version of the legacy tree. Keeping a second copy would make later provenance ambiguous and needlessly duplicate large notebook outputs. Any future migration must retain the original files and explicitly document the old-to-new mapping.
+- `OU_process/` contains early OU parameter and training-schedule experiments.
+- `Duffin_oscillator/` contains a separate first-passage example.
+- The paper experiment source notebooks are in `OU_process_2D/Models/` and `Double_Well_2D/Models/`.
+
+For current experiment code, start at the repository `README.md` and look in `met_pinn/`.

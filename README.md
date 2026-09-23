@@ -1,90 +1,59 @@
-# Boundary-adapted PINNs for elliptic Dirichlet problems
+# Boundary-adapted PINNs
 
-Research code supporting [*Boundary-Adapted PINNs for Elliptic Dirichlet Problems: H²(Ω) A Priori Error Bounds with Application to Mean Escape Time Computation*](https://arxiv.org/abs/2607.19167).
+Research code for boundary-adapted neural networks on elliptic PDEs, motivated by mean escape time problems. The repository contains both the original paper experiment notebooks and a newer Python implementation. The committor is one example; it is not the scope of the repository.
 
-The paper studies PINN ansatzes that impose homogeneous Dirichlet data exactly through a smooth, first-order-normalized distance approximation. The repository is being rebuilt from its original Colab notebooks into a reproducible experiment suite. The legacy notebooks remain intact while this work proceeds.
+## Start here
 
-## Run the periodic committor experiment
+| If you want to… | Open… |
+|---|---|
+| Find the maintained Python implementation | `met_pinn/` |
+| See the source notebooks for the 2026 paper experiments | `OU_process_2D/Models/` and `Double_Well_2D/Models/` |
+| Run the newer periodic committor example in Colab | `colab/periodic_committor.ipynb` |
+| Find the PDE definitions used by the newer implementation | `met_pinn/problems/` |
 
-Use the [periodic-committor Colab notebook](https://colab.research.google.com/github/n2pakbong/boundary-adapted-pinns/blob/main/colab/periodic_committor.ipynb). It is the canonical run interface: do not copy or edit its cells.
+## Paper experiment source
 
-### One-time Colab setup
+The paper's numerical section studies an Ornstein–Uhlenbeck process in a ball and a two-dimensional double-well process. It compares standard, variational, over-enforced, under-enforced, and boundary-adapted PINNs. The original notebooks for these runs are kept in the problem folders above; they are the source record for the paper experiments.
 
-Create a Colab Secret named `GITHUB_TOKEN`:
+- `OU_process_2D/Models/` contains the five OU method notebooks marked `[FINAL]`.
+- `Double_Well_2D/Models/` contains the five double-well method notebooks marked `[FINAL]`. The additional `boundary_adapted_engd_cg.ipynb` records a distinct optimizer variant and is retained.
+- `error_tables.ipynb` turns saved OU and double-well metrics into LaTeX tables. It expects `ou.txt` and `dw.txt` in its working directory.
+- `plots.ipynb` is a small image-cropping helper for comparing prediction and reference panels.
 
-1. Open the left sidebar's **Secrets** panel (key icon).
-2. Click **Add new secret**.
-3. Set the name to `GITHUB_TOKEN`.
-4. Paste the GitHub token with repository-read access.
-5. Enable **Notebook access**.
+The `[WIP]` double-well notebooks were drafts superseded by the corresponding `[FINAL]` notebooks and have been removed. The empty `exponential_pinn.ipynb` placeholder and empty Duffing placeholder files have also been removed.
 
-The notebook uses that secret only to clone this private repository in a fresh runtime. It does not write the token to Git, the notebook, or Google Drive.
+`OU_process/` contains earlier OU parameter and curriculum experiments. `Duffin_oscillator/` contains a separate first-passage example. They are retained as distinct research material; neither is the current committor workflow.
 
-### Every experiment run
+## Maintained Python implementation
 
-1. Select a T4 GPU.
-2. Run the notebook's setup cell, then its CPU-preflight cell.
-3. The preflight performs a complete tiny three-method run on CPU: finite-difference reference, training, checkpoints, summary, and figures. It verifies the end-to-end pipeline without GPU computation.
-4. If it succeeds, run the GPU-pilot cell. It performs the first scientific pilot: all three methods for 6,000 epochs, against 128/256-grid finite-difference references.
-5. The output directory contains the exact configuration, code revision, runtime metadata, checkpoints, metrics, reference data, summary, and figures. Use the notebook's resume cell after an interruption.
+- `met_pinn/models.py`: neural architectures, including exact boundary-factor ansatzes.
+- `met_pinn/problems/`: PDE operators, domain geometry, boundary data, and sampling for the current OU disk and periodic committor implementations.
+- `met_pinn/training.py`: their training loops and restartable checkpoints.
+- `met_pinn/periodic_comparison.py`: the complete periodic committor comparison, reference calculation, metrics, and figures.
+- `met_pinn/reference.py`: the committor finite-difference reference solver.
+- `met_pinn/cli.py`: the OU disk prototype command-line runner.
+- `configs/`: versioned run settings; the periodic committor has one CPU preflight and one GPU pilot.
+- `tests/`: tests for the current Python implementations.
 
-## Status
+This Python implementation is the starting point for future PDE work, not yet a general solver for arbitrary PDEs. Its training code still has problem-specific paths. For a new PDE, define the operator, domain, boundary conditions, and sampling in `met_pinn/problems/`; add a reference or validation method, a configuration under `configs/<problem>/`, and tests under `tests/`. Then connect it to the runner. The aim is to reuse the network, optimization, checkpointing, and plotting machinery instead of copying a full notebook for each PDE or method.
 
-The active, consolidated repository branch is `main`.
+## Run the periodic committor example
 
-- The original OU, double-well, and Duffing notebooks remain at the repository root as historical experiment records.
-- `met_pinn/` contains the new reusable implementation; its first target is the two-dimensional OU disk benchmark.
-- Double-well and Duffing are not being migrated at this stage.
-- The first new problem is a periodic-domain committor with two interior Dirichlet components; its mathematical specification is in [`docs/periodic_committor.md`](docs/periodic_committor.md).
+Open the [Colab notebook from `main`](https://colab.research.google.com/github/n2pakbong/boundary-adapted-pinns/blob/main/colab/periodic_committor.ipynb). Run setup, then the CPU preflight if this code version has not been checked, then the GPU pilot. Setup uses the saved `GITHUB_TOKEN` Colab Secret only to clone the private repository in a fresh runtime. The resume cell is only for a pilot interrupted before completion.
 
+The CPU preflight runs the complete small pipeline without GPU computation. The GPU pilot trains three committor methods for 6,000 epochs each and saves results to Google Drive. This pilot is not a paper-scale result.
 
-`MIGRATION.md` records the boundary between preserved legacy material and the new code.
+## Local checks
 
-## Local quick start
-
-Use a fresh Python environment with Python 3.10 or later.
+With Python 3.10 or later:
 
 ```bash
-git clone --branch main git@github.com:n2pakbong/boundary-adapted-pinns.git
-cd boundary-adapted-pinns
 pip install -e '.[dev]'
 pytest -q
-met-pinn configs/ou_disk/boundary_factor_smoke.json --run-dir artifacts/ou_smoke
 ```
 
-The smoke configuration is deliberately small and CPU-based. It verifies the runner; it is not a paper-scale experiment.
-
-To resume an interrupted run:
-
-```bash
-met-pinn configs/ou_disk/boundary_factor_smoke.json --run-dir artifacts/ou_smoke --resume
-```
-
-Every new run writes its configuration, runtime metadata, append-only metrics, a complete restart checkpoint (`last.pt`), and the current best checkpoint (`best.pt`) into its run directory.
-
-## Repository guide
-
-| Location | Contents |
-|---|---|
-| `met_pinn/problems/` | PDE/SDE problem specifications, domains, boundary factors, and validation hooks. |
-| `met_pinn/models.py` | Plain and boundary-factor neural ansatzes. |
-| `met_pinn/training.py` | Restartable strong-form experiment runners. |
-| `configs/` | Versioned configurations for individual runs. |
-| `tests/` | Mathematical and implementation-level checks. |
-| `colab/` | Canonical Colab setup, preflight, pilot, and resume notebook. |
-| `docs/periodic_committor.md` | Periodic committor problem, comparisons, and reference-grid protocol. |
-| `references.bib` | Bibliography for research material cited by the new experiments. |
-| `legacy/` | Provenance index for unchanged historical notebooks. |
-| `OU_process*`, `Double_Well_2D`, `Duffin_oscillator` | Preserved legacy notebooks and embedded outputs. |
-
-## Reproducibility policy
-
-Paper-facing results must be generated from a versioned configuration and retain their seed, validation rule, code revision, logs, and restartable checkpoints. Large transient checkpoints and arrays are excluded by default; selected archival results will be added deliberately with their provenance.
-
-## Legacy material
-
-The legacy notebooks have scientific value, but they are not a drop-in reproducible release: they depend on Colab cell order, unpinned packages, and in some cases missing local log files. They are preserved rather than silently rewritten. New results should use `met_pinn/` and `configs/`.
+These tests cover the current Python code. Each new PDE still needs its own mathematical validation and reference checks.
 
 ## License
 
-MIT; see [LICENSE](LICENSE).
+MIT; see `LICENSE`.

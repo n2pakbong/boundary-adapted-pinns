@@ -1,30 +1,17 @@
-# Rebuild branch: scope and provenance
+# Repository development status
 
-This branch starts a reproducible implementation without changing the legacy notebooks at the repository root. Those notebooks, their outputs, and their tracked PyTorch checkpoints remain the historical record for arXiv:2607.19167.
+## Paper experiment notebooks
 
-The first executable target is the two-dimensional OU disk benchmark. It provides an analytic validation route and exercises the boundary-adapted ansatz used in the paper. The double-well notebooks remain a preserved reference only: they will not be migrated in this stage. The Duffing material is out of scope for this stage.
+The paper-facing notebooks remain under `OU_process_2D/Models/` and `Double_Well_2D/Models/`. They record the original OU-ball and double-well comparisons. The `[WIP]` double-well drafts were removed because matching `[FINAL]` notebooks exist. No paper method notebook was removed.
 
-The first new scientific problem is now a periodic-domain committor problem.
-Its two periodic target sets, exact non-homogeneous boundary lift, and
-normalized two-component factor are documented in
-`docs/periodic_committor.md`.  The three-way comparison uses a normalized exact
-factor, an exact but unnormalized product factor, and a boundary-penalty MLP.
-The shared separation between `problems`, `models`, and `training` keeps this
-addition a focused experiment rather than another notebook fork.
+`OU_process/` contains earlier OU explorations, while `Duffin_oscillator/` contains a separate first-passage example. These are retained as distinct research material.
 
-Every new long run must write a self-contained directory containing:
+## Python implementation
 
-- the exact configuration and runtime metadata;
-- append-only metrics;
-- a complete restart checkpoint (`last.pt`) on a fixed cadence; and
-- the best checkpoint (`best.pt`).
+`met_pinn/` is the newer structured implementation. It currently contains an OU disk boundary-factor prototype and the periodic committor comparison. It does not yet replace the original paper notebooks or provide an arbitrary-PDE runner.
 
-No result is treated as a paper result until its configuration, seed, validation rule, and code revision are recorded.
+The intended extension point is `met_pinn/problems/`: each PDE supplies its operator, domain and boundary data, and collocation sampling. Shared model, optimization, checkpointing, and evaluation code should remain outside those problem modules. Each problem should have its own configuration, tests, and reference validation.
 
-## Validation status of this initial commit
+## Current Colab example
 
-The source files compile and the JSON configuration has been checked. The
-execution environment used to create this branch has neither PyTorch, SciPy,
-nor pytest, so the OU and periodic-committor unit tests, the finite-difference
-reference, and smoke runs have not been executed here. They are required checks
-in a Colab runtime before this scaffold is used for a scientific run.
+`colab/periodic_committor.ipynb` runs the periodic committor example. It is one example in the project and does not define the scope of future PDE work.
