@@ -6,7 +6,7 @@ The paper studies PINN ansatzes that impose homogeneous Dirichlet data exactly t
 
 ## Run the periodic committor experiment
 
-Use the [periodic-committor Colab notebook](https://colab.research.google.com/github/n2pakbong/boundary-adapted-pinns/blob/committor-colab/colab/periodic_committor.ipynb). It is the canonical run interface: do not copy or edit its cells.
+Use the [periodic-committor Colab notebook](https://colab.research.google.com/github/n2pakbong/boundary-adapted-pinns/blob/main/colab/periodic_committor.ipynb). It is the canonical run interface: do not copy or edit its cells.
 
 ### One-time Colab setup
 
@@ -30,13 +30,13 @@ The notebook uses that secret only to clone this private repository in a fresh r
 
 ## Status
 
-The current rebuild work is on `rebuild/committor-ready-core`.
+The active, consolidated repository branch is `main`.
 
 - The original OU, double-well, and Duffing notebooks remain at the repository root as historical experiment records.
 - `met_pinn/` contains the new reusable implementation; its first target is the two-dimensional OU disk benchmark.
 - Double-well and Duffing are not being migrated at this stage.
 - The first new problem is a periodic-domain committor with two interior Dirichlet components; its mathematical specification is in [`docs/periodic_committor.md`](docs/periodic_committor.md).
-- `committor-colab` is a slash-free alias of the rebuild branch. It exists solely because Colab cannot parse a branch name containing `/` in its GitHub URL format.
+
 
 `MIGRATION.md` records the boundary between preserved legacy material and the new code.
 
@@ -45,7 +45,7 @@ The current rebuild work is on `rebuild/committor-ready-core`.
 Use a fresh Python environment with Python 3.10 or later.
 
 ```bash
-git clone --branch rebuild/committor-ready-core git@github.com:n2pakbong/boundary-adapted-pinns.git
+git clone --branch main git@github.com:n2pakbong/boundary-adapted-pinns.git
 cd boundary-adapted-pinns
 pip install -e '.[dev]'
 pytest -q
