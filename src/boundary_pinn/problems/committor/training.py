@@ -210,6 +210,12 @@ def run_periodic_committor(
             if epoch == 1 or epoch % log_every == 0 or epoch == epochs:
                 metrics_file.write(json.dumps(record, sort_keys=True) + "\n")
                 metrics_file.flush()
+                print(
+                    f"{config.method}: epoch {epoch}/{epochs} "
+                    f"loss={loss_value:.6g} pde={record['pde_loss']:.6g} "
+                    f"boundary={record['boundary_loss']:.6g}",
+                    flush=True,
+                )
 
             if loss_value < best_loss:
                 best_loss = loss_value

@@ -52,7 +52,7 @@ def test_normalized_factor_has_unit_gradient_on_both_boundaries() -> None:
         assert torch.allclose(gradient.norm(dim=-1), torch.ones(16, dtype=torch.float64), atol=2.0e-8)
 
 
-def test_periodic_comparison_cpu_smoke(tmp_path) -> None:
+def test_periodic_comparison_cpu_smoke(tmp_path, capsys) -> None:
     import json
 
     from boundary_pinn.experiments.committor.periodic_two_well.comparison import (
@@ -96,9 +96,19 @@ def test_periodic_comparison_cpu_smoke(tmp_path) -> None:
 
     assert (output_dir / "reference_fd_64.npz").is_file()
     assert (output_dir / "summary.json").is_file()
+    summary = json.loads((output_dir / "summary.json").read_text(encoding="utf-8"))
+    metadata = json.loads((output_dir / "comparison_metadata.json").read_text(encoding="utf-8"))
+    assert "git_revision" in metadata
+    assert set(summary["methods"]) == set(config["methods"])
+    for method in ("boundary_adapted", "naive_product"):
+        assert summary["methods"][method]["source_boundary_rmse"] < 1e-8
+        assert summary["methods"][method]["target_boundary_rmse"] < 1e-8
     for method in config["methods"]:
         assert (output_dir / method / "last.pt").is_file()
         assert (output_dir / method / "best.pt").is_file()
     assert (output_dir / "losses.png").is_file()
+    captured = capsys.readouterr().out
+    for method in config["methods"]:
+        assert f"{method}: epoch 1/1" in captured
     with pytest.raises(FileExistsError, match="already contains a run"):
         run_periodic_comparison(config_path, output_dir)

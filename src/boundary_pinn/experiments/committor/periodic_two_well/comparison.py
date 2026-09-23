@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,22 @@ from ....problems.committor.training import (
     _dtype,
     run_periodic_committor,
 )
+
+
+def _git_revision() -> str | None:
+    """Return the checkout revision when this package is running from a Git clone."""
+    repository_root = Path(__file__).resolve().parents[5]
+    if not (repository_root / ".git").exists():
+        return None
+    try:
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repository_root,
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
 
 
 def _read_metrics(path: Path) -> list[dict[str, Any]]:
@@ -52,13 +69,30 @@ def _evaluate(
     return np.concatenate(values).reshape(reference.values.shape)
 
 
-def _boundary_rmse(prediction: np.ndarray, reference: PeriodicCommittorReference) -> dict[str, float]:
-    return {
-        "source_boundary_rmse": float(np.sqrt(np.mean(prediction[reference.source] ** 2))),
-        "target_boundary_rmse": float(
-            np.sqrt(np.mean((prediction[reference.target] - 1.0) ** 2))
-        ),
-    }
+def _boundary_rmse(
+    model: torch.nn.Module,
+    problem: PeriodicTwoWellCommittor,
+    *,
+    device: torch.device,
+    dtype: torch.dtype,
+    points_per_boundary: int = 512,
+) -> dict[str, float]:
+    """Evaluate Dirichlet errors on the two actual level-set boundaries."""
+    generator = torch.Generator(device="cpu").manual_seed(0)
+    model.eval()
+    with torch.no_grad():
+        source = problem.sample_boundary(
+            "source", points_per_boundary, device="cpu", dtype=dtype, generator=generator
+        ).to(device)
+        target = problem.sample_boundary(
+            "target", points_per_boundary, device="cpu", dtype=dtype, generator=generator
+        ).to(device)
+        source_error = model(source)
+        target_error = model(target) - 1.0
+        return {
+            "source_boundary_rmse": float(source_error.square().mean().sqrt().cpu()),
+            "target_boundary_rmse": float(target_error.square().mean().sqrt().cpu()),
+        }
 
 
 def _plot_method(
@@ -130,14 +164,33 @@ def run_periodic_comparison(config_path: Path, output_dir: Path, *, resume: bool
     ):
         raise FileExistsError(f"{output_dir} already contains a run; choose a new directory or use --resume")
     output_dir.mkdir(parents=True, exist_ok=True)
-    write_json(output_dir / "comparison_config.json", raw)
-    write_json(output_dir / "comparison_metadata.json", {
-        "created_utc": datetime.now(timezone.utc).isoformat(),
-        "config_path": str(config_path),
-    })
+    config_record = output_dir / "comparison_config.json"
+    if resume and config_record.is_file():
+        previous_config = json.loads(config_record.read_text(encoding="utf-8"))
+        if previous_config != raw:
+            raise ValueError("Cannot resume: the saved comparison configuration differs.")
+    else:
+        write_json(config_record, raw)
+
+    metadata_path = output_dir / "comparison_metadata.json"
+    now = datetime.now(timezone.utc).isoformat()
+    if resume and metadata_path.is_file():
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        metadata.setdefault("resumes", []).append({
+            "resumed_utc": now,
+            "git_revision": _git_revision(),
+        })
+    else:
+        metadata = {
+            "created_utc": now,
+            "config_path": str(config_path),
+            "git_revision": _git_revision(),
+        }
+    write_json(metadata_path, metadata)
 
     problem = PeriodicTwoWellCommittor(**raw["problem"])
     grid_sizes = [int(size) for size in raw["reference_grid_sizes"]]
+    print(f"Solving finite-difference references on {grid_sizes} grids (CPU).", flush=True)
     reference, fd_diagnostics = _reference_convergence(problem, grid_sizes)
     np.savez_compressed(
         output_dir / f"reference_fd_{reference.values.shape[0]}.npz",
@@ -147,6 +200,7 @@ def run_periodic_comparison(config_path: Path, output_dir: Path, *, resume: bool
         target=reference.target,
         domain=reference.domain,
     )
+    print(f"Reference saved. Starting {len(methods)} model training runs.", flush=True)
 
     requested_device = torch.device(str(raw["device"]))
     if requested_device.type == "cuda" and not torch.cuda.is_available():
@@ -173,6 +227,7 @@ def run_periodic_comparison(config_path: Path, output_dir: Path, *, resume: bool
             training=raw["training"],
         )
         method_resume = resume and (run_directory / "last.pt").exists()
+        print(f"Starting {method} ({config.training['epochs']} epochs).", flush=True)
         run_periodic_committor(config, run_directory, resume=method_resume)
         model = _build_periodic_committor_model(config, problem).to(device=requested_device, dtype=dtype)
         checkpoint = torch.load(run_directory / "best.pt", map_location=requested_device, weights_only=False)
@@ -182,14 +237,16 @@ def run_periodic_comparison(config_path: Path, output_dir: Path, *, resume: bool
             "best_epoch": int(checkpoint["epoch"]),
             "best_training_loss": float(checkpoint["best_loss"]),
             **periodic_reference_errors(prediction, reference),
-            **_boundary_rmse(prediction, reference),
+            **_boundary_rmse(model, problem, device=requested_device, dtype=dtype),
         }
         summary["methods"][method] = method_summary
         _plot_method(method, prediction, reference, output_dir / f"committor_{method}.png")
         write_json(output_dir / "summary.json", summary)
+        print(f"Completed {method}; results saved to {run_directory}.", flush=True)
 
     _plot_losses(method_directories, output_dir / "losses.png")
     write_json(output_dir / "summary.json", summary)
+    print(f"Comparison complete: {output_dir}", flush=True)
 
 
 def main() -> None:
