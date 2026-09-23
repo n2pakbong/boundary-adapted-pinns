@@ -4,6 +4,20 @@ Research code supporting [*Boundary-Adapted PINNs for Elliptic Dirichlet Problem
 
 The paper studies PINN ansatzes that impose homogeneous Dirichlet data exactly through a smooth, first-order-normalized distance approximation. The repository is being rebuilt from its original Colab notebooks into a reproducible experiment suite. The legacy notebooks remain intact while this work proceeds.
 
+## Run the periodic committor experiment
+
+Use the [self-contained Colab notebook](https://colab.research.google.com/github/n2pakbong/boundary-adapted-pinns/blob/committor-colab/colab/periodic_committor.ipynb).
+
+It has three explicit modes:
+
+| Mode | Purpose | GPU time |
+|---|---|---|
+| `check` | Install the code and run CPU-only tests. | None |
+| `pilot` | Train the three-method periodic-committor comparison and save checkpoints, finite-difference data, figures, and a JSON summary to Google Drive. | Required |
+| `resume` | Continue an interrupted pilot from its Drive output folder. | Required |
+
+The notebook defaults to `check`, so it never starts training accidentally. A GitHub token with repository read access is requested only when Colab needs to clone this private repository in a fresh runtime; it is not saved in the clone.
+
 ## Status
 
 The current rebuild work is on `rebuild/committor-ready-core`.
@@ -11,20 +25,14 @@ The current rebuild work is on `rebuild/committor-ready-core`.
 - The original OU, double-well, and Duffing notebooks remain at the repository root as historical experiment records.
 - `met_pinn/` contains the new reusable implementation; its first target is the two-dimensional OU disk benchmark.
 - Double-well and Duffing are not being migrated at this stage.
-- The first new problem is a periodic-domain committor with two interior
-  Dirichlet components; its mathematical specification is in
-  [`docs/periodic_committor.md`](docs/periodic_committor.md).
-- The runnable Colab handoff is
-  [openable directly in Colab](https://colab.research.google.com/github/n2pakbong/boundary-adapted-pinns/blob/committor-colab/colab/periodic_committor.ipynb): it saves
-  checkpoints, finite-difference data, summaries, and figures to Google Drive.
-  `committor-colab` is a slash-free alias of the rebuild branch because Colab
-  cannot parse a branch name containing `/` in this URL format.
+- The first new problem is a periodic-domain committor with two interior Dirichlet components; its mathematical specification is in [`docs/periodic_committor.md`](docs/periodic_committor.md).
+- `committor-colab` is a slash-free alias of the rebuild branch. It exists solely because Colab cannot parse a branch name containing `/` in its GitHub URL format.
 
 `MIGRATION.md` records the boundary between preserved legacy material and the new code.
 
-## Quick start
+## Local quick start
 
-Use a fresh Python environment with Python 3.10 or later. The intended execution environment is Google Colab for GPU runs.
+Use a fresh Python environment with Python 3.10 or later.
 
 ```bash
 git clone --branch rebuild/committor-ready-core git@github.com:n2pakbong/boundary-adapted-pinns.git
@@ -53,7 +61,7 @@ Every new run writes its configuration, runtime metadata, append-only metrics, a
 | `met_pinn/training.py` | Restartable strong-form experiment runners. |
 | `configs/` | Versioned configurations for individual runs. |
 | `tests/` | Mathematical and implementation-level checks. |
-| `colab/` | Colab usage notes. |
+| `colab/` | Colab run interface. |
 | `docs/periodic_committor.md` | Periodic committor problem, comparisons, and reference-grid protocol. |
 | `references.bib` | Bibliography for research material cited by the new experiments. |
 | `legacy/` | Provenance index for unchanged historical notebooks. |
