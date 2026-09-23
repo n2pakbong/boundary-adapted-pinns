@@ -4,7 +4,13 @@ This branch starts a reproducible implementation without changing the legacy not
 
 The first executable target is the two-dimensional OU disk benchmark. It provides an analytic validation route and exercises the boundary-adapted ansatz used in the paper. The double-well notebooks remain a preserved reference only: they will not be migrated in this stage. The Duffing material is out of scope for this stage.
 
-The next new scientific problem will be a periodic-domain committor problem. It is deliberately not implemented here: its PDE, source/target sets, periodic representation, and validation data must be specified before code is added. The shared separation between `problems`, `models`, and `training` is intended to make that addition principled rather than another notebook fork.
+The first new scientific problem is now a periodic-domain committor problem.
+Its two periodic target sets, exact non-homogeneous boundary lift, and
+normalized two-component factor are documented in
+`docs/periodic_committor.md`.  The three-way comparison uses a normalized exact
+factor, an exact but unnormalized product factor, and a boundary-penalty MLP.
+The shared separation between `problems`, `models`, and `training` keeps this
+addition a focused experiment rather than another notebook fork.
 
 Every new long run must write a self-contained directory containing:
 
@@ -18,7 +24,7 @@ No result is treated as a paper result until its configuration, seed, validation
 ## Validation status of this initial commit
 
 The source files compile and the JSON configuration has been checked. The
-execution environment used to create this branch has neither PyTorch nor
-pytest, so the OU unit tests and smoke run have not been executed here. They
-are required checks in a Colab runtime before this scaffold is used for a
-scientific run.
+execution environment used to create this branch has neither PyTorch, SciPy,
+nor pytest, so the OU and periodic-committor unit tests, the finite-difference
+reference, and smoke runs have not been executed here. They are required checks
+in a Colab runtime before this scaffold is used for a scientific run.

@@ -34,12 +34,25 @@ class MLP(nn.Module):
         return self.network(x).squeeze(-1)
 
 
+class PeriodicMLP(nn.Module):
+    """An MLP composed with a sine/cosine embedding of the unit torus."""
+
+    def __init__(self, network: MLP):
+        super().__init__()
+        self.network = network
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        phase = 2.0 * torch.pi * x
+        features = torch.cat((torch.sin(phase), torch.cos(phase)), dim=-1)
+        return self.network(features)
+
+
 class BoundaryFactorPINN(nn.Module):
     """``u(x)=rho(x)^exponent N(x)`` with a supplied boundary factor ``rho``."""
 
     def __init__(
         self,
-        network: MLP,
+        network: nn.Module,
         boundary_factor: Callable[[torch.Tensor], torch.Tensor],
         exponent: float = 1.0,
     ):
@@ -54,3 +67,27 @@ class BoundaryFactorPINN(nn.Module):
         rho = self.boundary_factor(x)
         # All current exact-boundary problems sample within their closed domain.
         return rho.clamp_min(0.0).pow(self.exponent) * self.network(x)
+
+
+class LiftedBoundaryFactorPINN(nn.Module):
+    """``u(x)=g(x)+rho(x)N(x)`` for non-homogeneous Dirichlet data.
+
+    ``g`` supplies the boundary values and ``rho`` vanishes on every Dirichlet
+    component.  Keeping the lifting and factor as explicit callables makes the
+    architecture useful for multiply-connected problems without baking a
+    particular PDE geometry into the network implementation.
+    """
+
+    def __init__(
+        self,
+        network: nn.Module,
+        lifting: Callable[[torch.Tensor], torch.Tensor],
+        boundary_factor: Callable[[torch.Tensor], torch.Tensor],
+    ):
+        super().__init__()
+        self.network = network
+        self.lifting = lifting
+        self.boundary_factor = boundary_factor
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.lifting(x) + self.boundary_factor(x) * self.network(x)

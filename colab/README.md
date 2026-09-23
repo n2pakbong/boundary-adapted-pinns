@@ -1,12 +1,12 @@
-# Colab use
+# Colab experiment workflow
 
-The experiment runner is deliberately notebook-independent. In a fresh Colab runtime, after cloning the branch, install the package and run a named configuration:
+Open the [periodic committor notebook on `main`](https://colab.research.google.com/github/n2pakbong/boundary-adapted-pinns/blob/main/colab/periodic_committor.ipynb).
 
-```bash
-pip install -e '.[dev]'
-met-pinn configs/ou_disk/boundary_factor_smoke.json --run-dir artifacts/ou_smoke
-```
+The notebook explains each stage and keeps the PDE and model code in the Python package.
 
-To resume after an interruption, rerun the same command with `--resume`. The run directory contains the configuration, metadata, append-only metrics, `last.pt`, and `best.pt`.
+1. **Setup and tests (CPU):** clones the private repository, installs it, and runs the fast geometry/boundary tests. A Colab Secret named `GITHUB_TOKEN` with Notebook access lets it clone the repository; the token is not saved to Drive or Git.
+2. **CPU preflight:** runs all three methods for two epochs, solves small finite-difference references, and checks that checkpoints, summaries, and figures are produced. This uses no GPU computation.
+3. **GPU pilot:** only after the preflight succeeds, trains all three methods for 6,000 epochs each and computes 128/256-grid references. It saves the configuration, code revision, runtime details, checkpoints, metrics, reference data, summary, and figures in Google Drive.
+4. **Resume:** if the GPU pilot stops before completion, use the resume cell. It asks for the exact Drive folder printed when the pilot started and continues from its checkpoints.
 
-The smoke configuration uses CPU and is only a wiring check. GPU configurations and paper-scale budgets will be added only after the OU validation protocol is agreed.
+Do not run the resume cell while a pilot is still running.

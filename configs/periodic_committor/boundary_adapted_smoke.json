@@ -1,0 +1,28 @@
+{
+  "seed": 7,
+  "device": "cuda",
+  "dtype": "float64",
+  "method": "boundary_adapted",
+  "problem": {
+    "a": 1.0,
+    "b": 0.6,
+    "epsilon": 0.4,
+    "source_center": [0.25, 0.0],
+    "target_center": [0.75, 0.0],
+    "set_radius": 0.5
+  },
+  "model": {
+    "width": 32,
+    "depth": 3,
+    "activation": "tanh",
+    "gain": 1.0
+  },
+  "training": {
+    "epochs": 20,
+    "collocation_points": 128,
+    "learning_rate": 0.001,
+    "lr_gamma": 1.0,
+    "checkpoint_every": 5,
+    "log_every": 1
+  }
+}
