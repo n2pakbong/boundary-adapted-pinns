@@ -1,3 +1,3 @@
-# Earlier Ornstein–Uhlenbeck studies
+## Earlier Ornstein–Uhlenbeck studies
 
-This collection records earlier OU mean escape time experiments, including parameter studies, training schedules, curriculum variants, saved model checkpoints, and solution plots. These studies are distinct from the two-dimensional OU-ball comparison used in the paper. Their derivations, code, references, and outputs remain with the original notebooks.
+This collection preserves three selected examples from earlier OU mean escape time work: standard-PINN training, boundary-fitted-PINN training, and a visualization of parameter influence. These studies are separate from the two-dimensional OU-ball comparison used in the paper.
