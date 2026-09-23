@@ -6,14 +6,27 @@ The paper studies PINN ansatzes that impose homogeneous Dirichlet data exactly t
 
 ## Run the periodic committor experiment
 
-Use the [periodic-committor Colab notebook](https://colab.research.google.com/github/n2pakbong/boundary-adapted-pinns/blob/committor-colab/colab/periodic_committor.ipynb).
+Use the [periodic-committor Colab notebook](https://colab.research.google.com/github/n2pakbong/boundary-adapted-pinns/blob/committor-colab/colab/periodic_committor.ipynb). It is the canonical run interface: do not copy or edit its cells.
 
-It has two deliberate stages:
+### One-time Colab setup
 
-1. a **CPU preflight**: the complete three-method pipeline runs for two epochs, writes checkpoints, finite-difference data, figures, and a JSON summary, and proves the end-to-end workflow without using GPU computation;
-2. a **GPU pilot**: only after the preflight succeeds, it runs the three methods for 6,000 epochs each against 128/256-grid finite-difference references.
+Create a Colab Secret named `GITHUB_TOKEN`:
 
-A GitHub token with repository read access is requested only when a fresh Colab runtime needs to clone this private repository. It is not stored in the clone and is not used for training.
+1. Open the left sidebar's **Secrets** panel (key icon).
+2. Click **Add new secret**.
+3. Set the name to `GITHUB_TOKEN`.
+4. Paste the GitHub token with repository-read access.
+5. Enable **Notebook access**.
+
+The notebook uses that secret only to clone this private repository in a fresh runtime. It does not write the token to Git, the notebook, or Google Drive.
+
+### Every experiment run
+
+1. Select a T4 GPU.
+2. Run the notebook's setup cell, then its CPU-preflight cell.
+3. The preflight performs a complete tiny three-method run on CPU: finite-difference reference, training, checkpoints, summary, and figures. It verifies the end-to-end pipeline without GPU computation.
+4. If it succeeds, run the GPU-pilot cell. It performs the first scientific pilot: all three methods for 6,000 epochs, against 128/256-grid finite-difference references.
+5. The output directory contains the exact configuration, code revision, runtime metadata, checkpoints, metrics, reference data, summary, and figures. Use the notebook's resume cell after an interruption.
 
 ## Status
 
@@ -58,7 +71,7 @@ Every new run writes its configuration, runtime metadata, append-only metrics, a
 | `met_pinn/training.py` | Restartable strong-form experiment runners. |
 | `configs/` | Versioned configurations for individual runs. |
 | `tests/` | Mathematical and implementation-level checks. |
-| `colab/` | Colab setup, CPU preflight, GPU pilot, and resume interface. |
+| `colab/` | Canonical Colab setup, preflight, pilot, and resume notebook. |
 | `docs/periodic_committor.md` | Periodic committor problem, comparisons, and reference-grid protocol. |
 | `references.bib` | Bibliography for research material cited by the new experiments. |
 | `legacy/` | Provenance index for unchanged historical notebooks. |
