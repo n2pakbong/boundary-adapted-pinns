@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,20 @@ from .training import (
     _dtype,
     run_periodic_committor,
 )
+
+
+def _git_revision() -> str | None:
+    """Return the source revision when the runner is launched from a Git checkout."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return result.stdout.strip() or None
 
 
 def _read_metrics(path: Path) -> list[dict[str, Any]]:
@@ -132,6 +147,7 @@ def run_periodic_comparison(config_path: Path, output_dir: Path, *, resume: bool
     write_json(output_dir / "comparison_metadata.json", {
         "created_utc": datetime.now(timezone.utc).isoformat(),
         "config_path": str(config_path),
+        "git_revision": _git_revision(),
     })
 
     problem = PeriodicTwoWellCommittor(**raw["problem"])
