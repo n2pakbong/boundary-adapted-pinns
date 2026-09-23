@@ -56,7 +56,7 @@ When this repository is private, the Colab notebook uses a `GITHUB_TOKEN` Colab 
 
 If this repository supports your work, cite the accompanying paper:
 
-> N. Pakbong, “Boundary-Adapted PINNs for Elliptic Dirichlet Problems: H²(Ω) A Priori Error Bounds with Application to Mean Escape Time Computation,” 2026. [arXiv:2607.19167](https://arxiv.org/abs/2607.19167).
+*Boundary-Adapted PINNs for Elliptic Dirichlet Problems: H²(Ω) A Priori Error Bounds with Application to Mean Escape Time Computation*, arXiv:2607.19167 (2026). [https://arxiv.org/abs/2607.19167](https://arxiv.org/abs/2607.19167).
 
 ## License
 
