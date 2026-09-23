@@ -125,7 +125,9 @@ def run_periodic_comparison(config_path: Path, output_dir: Path, *, resume: bool
     methods = list(raw["methods"])
     if not methods:
         raise ValueError("comparison configuration needs at least one method")
-    if output_dir.exists() and any(output_dir.iterdir()) and not resume:
+    if output_dir.exists() and not resume and any(
+        path.name != "console.log" for path in output_dir.iterdir()
+    ):
         raise FileExistsError(f"{output_dir} already contains a run; choose a new directory or use --resume")
     output_dir.mkdir(parents=True, exist_ok=True)
     write_json(output_dir / "comparison_config.json", raw)
