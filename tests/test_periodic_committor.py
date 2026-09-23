@@ -49,3 +49,51 @@ def test_normalized_factor_has_unit_gradient_on_both_boundaries() -> None:
         factor = problem.boundary_adapted_factor(x)
         gradient = torch.autograd.grad(factor.sum(), x)[0]
         assert torch.allclose(gradient.norm(dim=-1), torch.ones(16, dtype=torch.float64), atol=2.0e-8)
+
+
+def test_periodic_comparison_cpu_smoke(tmp_path) -> None:
+    import json
+
+    from boundary_pinn.experiments.committor.periodic_two_well.comparison import (
+        run_periodic_comparison,
+    )
+
+    config = {
+        "seed": 7,
+        "device": "cpu",
+        "dtype": "float64",
+        "methods": ["boundary_adapted", "naive_product", "penalty"],
+        "problem": {
+            "a": 1.0,
+            "b": 0.6,
+            "epsilon": 0.4,
+            "source_center": [0.25, 0.0],
+            "target_center": [0.75, 0.0],
+            "set_radius": 0.5,
+        },
+        "model": {"width": 4, "depth": 1, "activation": "tanh", "gain": 1.0},
+        "training": {
+            "epochs": 1,
+            "collocation_points": 8,
+            "boundary_points": 4,
+            "boundary_weight": 100.0,
+            "learning_rate": 0.001,
+            "lr_gamma": 1.0,
+            "checkpoint_every": 1,
+            "log_every": 1,
+        },
+        "reference_grid_sizes": [32, 64],
+        "evaluation_batch_size": 512,
+    }
+    config_path = tmp_path / "cpu_smoke.json"
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    output_dir = tmp_path / "run"
+
+    run_periodic_comparison(config_path, output_dir)
+
+    assert (output_dir / "reference_fd_64.npz").is_file()
+    assert (output_dir / "summary.json").is_file()
+    for method in config["methods"]:
+        assert (output_dir / method / "last.pt").is_file()
+        assert (output_dir / method / "best.pt").is_file()
+    assert (output_dir / "losses.png").is_file()

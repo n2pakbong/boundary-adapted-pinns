@@ -33,6 +33,45 @@ class PeriodicCommittorConfig:
         return cls(**json.loads(path.read_text(encoding="utf-8")))
 
 
+def _dtype(name: str) -> torch.dtype:
+    if name == "float64":
+        return torch.float64
+    if name == "float32":
+        return torch.float32
+    raise ValueError("dtype must be 'float64' or 'float32'")
+
+
+def _seed_everything(seed: int) -> None:
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+
+def _checkpoint_payload(
+    *,
+    epoch: int,
+    model: torch.nn.Module,
+    optimizer: torch.optim.Optimizer,
+    scheduler: torch.optim.lr_scheduler.LRScheduler,
+    best_loss: float,
+) -> dict[str, Any]:
+    return {
+        "epoch": epoch,
+        "model_state": model.state_dict(),
+        "optimizer_state": optimizer.state_dict(),
+        "scheduler_state": scheduler.state_dict(),
+        "best_loss": best_loss,
+        "rng_state": rng_state(),
+    }
+
+
+def _cpu_model_state(model: torch.nn.Module) -> dict[str, torch.Tensor]:
+    """Copy parameters for an evaluation checkpoint without GPU storage."""
+    return {name: value.detach().cpu().clone() for name, value in model.state_dict().items()}
+
+
 def _initialize_mlp(model_config: dict[str, Any], *, input_dim: int = 2) -> MLP:
     base = MLP(
         input_dim=input_dim,
