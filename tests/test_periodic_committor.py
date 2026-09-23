@@ -1,3 +1,4 @@
+import pytest
 import torch
 
 from boundary_pinn.models import LiftedBoundaryFactorPINN, MLP, PeriodicMLP
@@ -88,6 +89,8 @@ def test_periodic_comparison_cpu_smoke(tmp_path) -> None:
     config_path = tmp_path / "cpu_smoke.json"
     config_path.write_text(json.dumps(config), encoding="utf-8")
     output_dir = tmp_path / "run"
+    output_dir.mkdir()
+    (output_dir / "console.log").write_text("capture started\n", encoding="utf-8")
 
     run_periodic_comparison(config_path, output_dir)
 
@@ -97,3 +100,5 @@ def test_periodic_comparison_cpu_smoke(tmp_path) -> None:
         assert (output_dir / method / "last.pt").is_file()
         assert (output_dir / method / "best.pt").is_file()
     assert (output_dir / "losses.png").is_file()
+    with pytest.raises(FileExistsError, match="already contains a run"):
+        run_periodic_comparison(config_path, output_dir)
