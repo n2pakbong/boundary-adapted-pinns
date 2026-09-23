@@ -4,20 +4,16 @@ Research code supporting [*Boundary-Adapted PINNs for Elliptic Dirichlet Problem
 
 The paper studies PINN ansatzes that impose homogeneous Dirichlet data exactly through a smooth, first-order-normalized distance approximation. The repository is being rebuilt from its original Colab notebooks into a reproducible experiment suite. The legacy notebooks remain intact while this work proceeds.
 
-## Run the periodic committor pilot
+## Run the periodic committor experiment
 
-Open the [periodic-committor Colab notebook](https://colab.research.google.com/github/n2pakbong/boundary-adapted-pinns/blob/committor-colab/colab/periodic_committor.ipynb), choose a T4 GPU, and select **Runtime → Run all**.
+Use the [periodic-committor Colab notebook](https://colab.research.google.com/github/n2pakbong/boundary-adapted-pinns/blob/committor-colab/colab/periodic_committor.ipynb).
 
-This single notebook:
+It has two deliberate stages:
 
-1. clones the private repository in a fresh runtime, using a GitHub repository-read token requested once and not stored;
-2. installs the package and runs the CPU-only tests;
-3. runs the full comparison: boundary-adapted exact ansatz, naïve exact-product ansatz, and boundary-penalty PINN, each trained for 6,000 epochs;
-4. solves 128 and 256-grid finite-difference reference problems;
-5. writes configurations, checkpoints, metrics, finite-difference data, figures, and a JSON summary into a timestamped Google Drive directory;
-6. includes a resume cell for interrupted runs.
+1. a **CPU preflight**: the complete three-method pipeline runs for two epochs, writes checkpoints, finite-difference data, figures, and a JSON summary, and proves the end-to-end workflow without using GPU computation;
+2. a **GPU pilot**: only after the preflight succeeds, it runs the three methods for 6,000 epochs each against 128/256-grid finite-difference references.
 
-The notebook is the canonical run interface. Use it rather than assembling commands manually.
+A GitHub token with repository read access is requested only when a fresh Colab runtime needs to clone this private repository. It is not stored in the clone and is not used for training.
 
 ## Status
 
@@ -62,7 +58,7 @@ Every new run writes its configuration, runtime metadata, append-only metrics, a
 | `met_pinn/training.py` | Restartable strong-form experiment runners. |
 | `configs/` | Versioned configurations for individual runs. |
 | `tests/` | Mathematical and implementation-level checks. |
-| `colab/` | Canonical Colab experiment notebook. |
+| `colab/` | Colab setup, CPU preflight, GPU pilot, and resume interface. |
 | `docs/periodic_committor.md` | Periodic committor problem, comparisons, and reference-grid protocol. |
 | `references.bib` | Bibliography for research material cited by the new experiments. |
 | `legacy/` | Provenance index for unchanged historical notebooks. |
