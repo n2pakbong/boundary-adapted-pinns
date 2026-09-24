@@ -18,7 +18,12 @@ import matplotlib.pyplot as plt
 
 from ....checkpointing import write_json
 from ....problems.committor import PeriodicTwoWellCommittor
-from ....problems.committor.reference import PeriodicCommittorReference, periodic_reference_errors, solve_periodic_committor_fd
+from ....problems.committor.reference import (
+    PeriodicCommittorReference,
+    periodic_reference_errors,
+    periodic_reference_grid_errors,
+    solve_periodic_committor_fd,
+)
 from ....problems.committor.training import (
     PeriodicCommittorConfig,
     _build_periodic_committor_model,
@@ -135,23 +140,16 @@ def _plot_losses(method_directories: dict[str, Path], destination: Path) -> None
 
 def _reference_convergence(
     problem: PeriodicTwoWellCommittor, grid_sizes: list[int]
-) -> tuple[PeriodicCommittorReference, dict[str, float]]:
+) -> tuple[PeriodicCommittorReference, dict[str, float | None]]:
     references = {size: solve_periodic_committor_fd(problem, size) for size in grid_sizes}
     finest_size = max(grid_sizes)
     finest = references[finest_size]
-    diagnostics: dict[str, float] = {}
+    diagnostics: dict[str, float | None] = {}
     for size, coarse in references.items():
         if size == finest_size or finest_size % size:
             continue
-        stride = finest_size // size
-        fine_values = finest.values[::stride, ::stride]
-        fine_domain = finest.domain[::stride, ::stride]
-        common = coarse.domain & fine_domain
-        diagnostics[f"fd_l2_{size}_to_{finest_size}"] = float(
-            np.sqrt(np.mean((coarse.values[common] - fine_values[common]) ** 2))
-        )
+        diagnostics.update(periodic_reference_grid_errors(coarse, finest))
     return finest, diagnostics
-
 
 def run_periodic_comparison(config_path: Path, output_dir: Path, *, resume: bool = False) -> None:
     """Run the configured methods and save the comparison artifacts.
@@ -257,15 +255,41 @@ def run_periodic_comparison(config_path: Path, output_dir: Path, *, resume: bool
 
 
 
-def audit_saved_boundaries(
+def evaluate_saved_models(
     output_dir: Path, *, training_git_revision: str | None = None
 ) -> Path:
-    """Check saved best checkpoints on the true boundaries using CPU only.\n\n    Writes boundary_diagnostics.json beside the run files without retraining\n    or replacing the original summary.\n    """
-    raw = json.loads((output_dir / "comparison_config.json").read_text(encoding="utf-8"))
+    """Evaluate existing best checkpoints against the saved FDM reference on CPU.
+
+    This performs no training and does not overwrite summary.json. It writes
+    solution-error norms and true-boundary errors to saved_model_evaluation.json.
+    """
+    config_path = output_dir / "comparison_config.json"
+    if not config_path.is_file():
+        raise FileNotFoundError(f"Missing comparison_config.json in {output_dir}")
+    raw = json.loads(config_path.read_text(encoding="utf-8"))
+    grid_sizes = [int(size) for size in raw["reference_grid_sizes"]]
+    reference_path = output_dir / f"reference_fd_{max(grid_sizes)}.npz"
+    if not reference_path.is_file():
+        raise FileNotFoundError(f"Missing finite-difference reference: {reference_path}")
+    with np.load(reference_path) as saved:
+        values = saved["values"]
+        reference = PeriodicCommittorReference(
+            grid=saved["grid"],
+            values=values,
+            source=saved["source"],
+            target=saved["target"],
+            domain=saved["domain"],
+            spacing=1.0 / values.shape[0],
+        )
+
     problem = PeriodicTwoWellCommittor(**raw["problem"])
     dtype = _dtype(str(raw["dtype"]))
     device = torch.device("cpu")
-    methods: dict[str, dict[str, float]] = {}
+    batch_size = int(raw.get("evaluation_batch_size", 16_384))
+    metadata_path = output_dir / "comparison_metadata.json"
+    metadata = json.loads(metadata_path.read_text(encoding="utf-8")) if metadata_path.is_file() else {}
+    methods: dict[str, dict[str, float | int | None]] = {}
+
     for method in raw["methods"]:
         config = PeriodicCommittorConfig(
             seed=int(raw["seed"]),
@@ -277,26 +301,38 @@ def audit_saved_boundaries(
             training=raw["training"],
         )
         model = _build_periodic_committor_model(config, problem).to(device=device, dtype=dtype)
-        checkpoint = torch.load(
-            output_dir / method / "best.pt", map_location=device, weights_only=False
-        )
+        checkpoint_path = output_dir / method / "best.pt"
+        if not checkpoint_path.is_file():
+            raise FileNotFoundError(f"Missing best checkpoint for {method}: {checkpoint_path}")
+        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
         model.load_state_dict(checkpoint["model_state"])
-        methods[method] = _boundary_rmse(model, problem, device=device, dtype=dtype)
-        print(f"Checked {method} boundaries on CPU.", flush=True)
+        prediction = _evaluate(
+            model, reference, device=device, dtype=dtype, batch_size=batch_size
+        )
+        methods[method] = {
+            "best_epoch": int(checkpoint["epoch"]),
+            "best_training_objective": float(checkpoint["best_loss"]),
+            **periodic_reference_errors(prediction, reference),
+            **_boundary_rmse(model, problem, device=device, dtype=dtype),
+        }
+        print(f"Evaluated {method} checkpoint against FDM reference on CPU.", flush=True)
 
-    metadata_path = output_dir / "comparison_metadata.json"
-    metadata = json.loads(metadata_path.read_text(encoding="utf-8")) if metadata_path.is_file() else {}
-    destination = output_dir / "boundary_diagnostics.json"
+    destination = output_dir / "saved_model_evaluation.json"
     write_json(destination, {
-        "points_per_boundary": 512,
-        "sample_seed": 0,
         "training_git_revision": training_git_revision or metadata.get("git_revision"),
-        "audit_git_revision": _git_revision(),
+        "evaluation_git_revision": _git_revision(),
+        "reference_file": reference_path.name,
+        "reference_grid_size": int(reference.values.shape[0]),
+        "norm_convention": (
+            "Area-weighted finite-difference Sobolev norms. L2 uses exterior-domain "
+            "nodes; H1 uses axial stencils contained in the domain; H2 uses full 3x3 "
+            "stencils. H2 seminorm includes xx, xy, and yy once each. Relative errors "
+            "use the matching FDM reference norm and mask."
+        ),
         "methods": methods,
     })
-    print(f"Boundary diagnostics saved: {destination}", flush=True)
+    print(f"Saved solution-error report: {destination}", flush=True)
     return destination
-
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run and plot the periodic committor comparison.")
@@ -304,21 +340,21 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, required=True, help="Directory for checkpoints, data, and figures")
     parser.add_argument("--resume", action="store_true", help="Resume methods with an existing last.pt")
     parser.add_argument(
-        "--audit-boundaries", action="store_true",
-        help="Check saved best.pt models at the true boundaries using the CPU; never train",
+        "--evaluate-saved-models", action="store_true",
+        help="Evaluate saved best.pt models against the FDM reference and true boundaries on CPU; never train",
     )
     parser.add_argument(
         "--training-git-revision",
         help="Original run revision when auditing an older run without revision metadata",
     )
     args = parser.parse_args()
-    if args.audit_boundaries:
+    if args.evaluate_saved_models:
         if args.resume or args.config is not None:
-            parser.error("--audit-boundaries uses only --output-dir")
-        audit_saved_boundaries(args.output_dir, training_git_revision=args.training_git_revision)
+            parser.error("--evaluate-saved-models uses only --output-dir")
+        evaluate_saved_models(args.output_dir, training_git_revision=args.training_git_revision)
         return
     if args.training_git_revision is not None:
-        parser.error("--training-git-revision can only be used with --audit-boundaries")
+        parser.error("--training-git-revision can only be used with --evaluate-saved-models")
     if args.config is None:
         parser.error("config is required for training")
     run_periodic_comparison(args.config, args.output_dir, resume=args.resume)

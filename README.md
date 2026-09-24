@@ -29,7 +29,7 @@ pip install -e '.[dev]'
 pytest -q
 ```
 
-The package name is `boundary-pinn`; its import name is `boundary_pinn`. Shared network architectures and checkpoint utilities live at the package root. Problem definitions are grouped by equation type. Experiment-specific training and validation code remains identifiable with the problem it studies.
+The package name is `boundary-pinn`; its import name is `boundary_pinn`. Shared network architectures and checkpoint utilities live at the package root. Problem definitions are grouped by equation type. Experiment-specific training and validation code remains identifiable with the problem it studies. GitHub Actions runs the CPU test suite on each pull request; these checks test the proposed branch without merging it and never request a GPU.
 
 The current Python examples are an Ornstein–Uhlenbeck mean escape time problem on a disk and a periodic two-well committor. The code does not yet provide a turnkey solver for arbitrary PDEs. New PDE studies can reuse the shared architectures and numerical utilities while adding their own operator, domain, boundary conditions, experiment settings, tests, and reference solution.
 
@@ -39,7 +39,7 @@ The periodic committor is the maintained PINN example for a PDE with two separat
 
 [Open the periodic committor notebook in Colab](https://colab.research.google.com/github/n2pakbong/boundary-adapted-pinns/blob/main/colab/periodic_committor.ipynb)
 
-Run Setup and the CPU preflight before starting the GPU pilot. The pilot is a single-seed exploratory comparison, not a paper result. It writes the configuration, metrics, checkpoints, finite-difference reference, summary, and diagnostic plots to a timestamped folder in Google Drive. The notebook and the experiment guide explain what each file contains and how to interpret the numerical comparisons.
+Run Setup and the CPU preflight before starting the GPU pilot. The pilot is a single-seed exploratory comparison, not a paper result. It writes the configuration, metrics, checkpoints, finite-difference reference, summary, and diagnostic plots to a timestamped folder in Google Drive. The notebook and experiment guide explain each file, define the PDE and boundary losses, and report absolute and relative L2, H1, and grid-estimated H2 solution errors against the finite-difference reference. The saved-checkpoint evaluation can be rerun on CPU, without repeating training.
 
 For local CPU testing:
 

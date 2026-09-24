@@ -1,8 +1,14 @@
+import numpy as np
 import pytest
 import torch
 
 from boundary_pinn.models import LiftedBoundaryFactorPINN, MLP, PeriodicMLP
 from boundary_pinn.problems.committor import PeriodicTwoWellCommittor
+from boundary_pinn.problems.committor.reference import (
+    PeriodicCommittorReference,
+    periodic_reference_errors,
+    periodic_reference_grid_errors,
+)
 
 
 def _problem() -> PeriodicTwoWellCommittor:
@@ -50,6 +56,53 @@ def test_normalized_factor_has_unit_gradient_on_both_boundaries() -> None:
         factor = problem.boundary_adapted_factor(x)
         gradient = torch.autograd.grad(factor.sum(), x)[0]
         assert torch.allclose(gradient.norm(dim=-1), torch.ones(16, dtype=torch.float64), atol=2.0e-8)
+
+
+def _smooth_reference(grid_size: int) -> PeriodicCommittorReference:
+    axis = np.arange(grid_size, dtype=float) / grid_size
+    x, y = np.meshgrid(axis, axis, indexing="ij")
+    values = np.sin(2.0 * np.pi * x) + 0.3 * np.cos(2.0 * np.pi * y)
+    domain = np.ones_like(values, dtype=bool)
+    return PeriodicCommittorReference(
+        grid=np.stack((x, y), axis=-1),
+        values=values,
+        source=np.zeros_like(domain),
+        target=np.zeros_like(domain),
+        domain=domain,
+        spacing=1.0 / grid_size,
+    )
+
+
+def test_solution_errors_include_absolute_and_relative_l2_h1_h2_norms() -> None:
+    reference = _smooth_reference(64)
+    exact = periodic_reference_errors(reference.values.copy(), reference)
+    names = (
+        "grid_l2_abs", "grid_l2_rel",
+        "grid_h1_abs", "grid_h1_rel",
+        "grid_h1_seminorm_abs", "grid_h1_seminorm_rel",
+        "grid_h2_abs", "grid_h2_rel",
+        "grid_h2_seminorm_abs", "grid_h2_seminorm_rel",
+    )
+    assert all(exact[name] == pytest.approx(0.0) for name in names)
+
+    prediction = reference.values + 0.05
+    errors = periodic_reference_errors(prediction, reference)
+    assert errors["grid_l2_abs"] == pytest.approx(0.05)
+    assert errors["grid_l2_rel"] > 0.0
+    assert errors["grid_h1_abs"] > 0.0
+    assert errors["grid_h2_abs"] > 0.0
+    assert errors["grid_h1_seminorm_abs"] == pytest.approx(0.0, abs=1.0e-12)
+    assert errors["grid_h2_seminorm_abs"] == pytest.approx(0.0, abs=1.0e-10)
+
+
+def test_fdm_grid_comparison_uses_derivatives_from_each_resolution() -> None:
+    report = periodic_reference_grid_errors(
+        _smooth_reference(32), _smooth_reference(64)
+    )
+    assert report["fd_grid_l2_abs_32_to_64"] == pytest.approx(0.0, abs=1.0e-12)
+    assert report["fd_grid_l2_rel_32_to_64"] == pytest.approx(0.0, abs=1.0e-12)
+    assert report["fd_grid_h1_abs_32_to_64"] > 0.0
+    assert report["fd_grid_h2_abs_32_to_64"] > 0.0
 
 
 def test_periodic_comparison_cpu_smoke(tmp_path, capsys) -> None:
@@ -108,15 +161,21 @@ def test_periodic_comparison_cpu_smoke(tmp_path, capsys) -> None:
         assert (output_dir / method / "best.pt").is_file()
     assert (output_dir / "losses.png").is_file()
     from boundary_pinn.experiments.committor.periodic_two_well.comparison import (
-        audit_saved_boundaries,
+        evaluate_saved_models,
     )
-    audit_path = audit_saved_boundaries(output_dir, training_git_revision="test-revision")
-    audit = json.loads(audit_path.read_text(encoding="utf-8"))
-    assert audit["training_git_revision"] == "test-revision"
-    assert set(audit["methods"]) == set(config["methods"])
+    evaluation_path = evaluate_saved_models(output_dir, training_git_revision="test-revision")
+    evaluation = json.loads(evaluation_path.read_text(encoding="utf-8"))
+    assert evaluation_path.name == "saved_model_evaluation.json"
+    assert evaluation["training_git_revision"] == "test-revision"
+    assert set(evaluation["methods"]) == set(config["methods"])
+    for method in config["methods"]:
+        assert evaluation["methods"][method]["grid_l2_abs"] >= 0.0
+        assert evaluation["methods"][method]["grid_l2_rel"] >= 0.0
+        assert evaluation["methods"][method]["grid_h1_abs"] >= 0.0
+        assert evaluation["methods"][method]["grid_h2_abs"] >= 0.0
     for method in ("boundary_adapted", "naive_product"):
-        assert audit["methods"][method]["source_boundary_rmse"] < 1e-8
-        assert audit["methods"][method]["target_boundary_rmse"] < 1e-8
+        assert evaluation["methods"][method]["source_boundary_rmse"] < 1e-8
+        assert evaluation["methods"][method]["target_boundary_rmse"] < 1e-8
     captured = capsys.readouterr().out
     for method in config["methods"]:
         assert f"{method} | epoch 1/1" in captured
