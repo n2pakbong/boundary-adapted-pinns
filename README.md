@@ -35,22 +35,34 @@ The current Python examples are an Ornstein–Uhlenbeck mean escape time problem
 
 ## Running the periodic committor example
 
-The complete notebook explains each stage and saves results to Google Drive:
+The periodic committor is the maintained PINN example for a PDE with two separated Dirichlet boundaries. Its one Colab notebook explains the equation, boundary construction, CPU checks, GPU pilot, saved outputs, and how to resume:
 
-[`colab/periodic_committor.ipynb`](colab/periodic_committor.ipynb)
+[Open the periodic committor notebook in Colab](https://colab.research.google.com/github/n2pakbong/boundary-adapted-pinns/blob/main/colab/periodic_committor.ipynb)
 
-The CPU preflight exercises the full training, reference, checkpoint, and plotting pipeline with tiny settings. It does not use a GPU and is a wiring check. The GPU pilot is a separate cell in the same notebook and runs only when started explicitly.
+Run Setup and the CPU preflight before starting the GPU pilot. The pilot is a single-seed exploratory comparison, not a paper result. It writes the configuration, metrics, checkpoints, finite-difference reference, summary, and diagnostic plots to a timestamped folder in Google Drive. The notebook and the experiment guide explain what each file contains and how to interpret the numerical comparisons.
 
-For a local CPU preflight:
+For local CPU testing:
 
 ```bash
-periodic-committor experiments/committor/periodic_two_well/configs/preflight_comparison_cpu.json \
+pip install -e '.[dev]'
+pytest -q
+```
+
+For a small local end-to-end preflight:
+
+```bash
+periodic-committor experiments/committor/periodic_two_well/configs/cpu_preflight.json \
   --output-dir runs/periodic_committor/preflight
 ```
 
-For larger runs, edit or copy a versioned configuration and choose a result directory outside the source tree. Each run records its configuration, code revision, metrics, checkpoints, reference data, and figures. The finite-difference reference is checked at multiple grid resolutions; it is a numerical comparator whose convergence should be examined before interpreting errors.
+The experiment implementation is organized by purpose:
 
-When this repository is private, the Colab notebook uses a `GITHUB_TOKEN` Colab Secret to fetch the source from GitHub. That token is only for repository access; it is not used for training or Google Drive. Public access to the repository removes the need for a token.
+- `src/boundary_pinn/problems/committor/periodic_two_well.py` defines the PDE, periodic geometry, boundary sampling, and residual.
+- `src/boundary_pinn/problems/committor/training.py` defines the three ansatzes, training loop, progress output, metrics, and restartable checkpoints.
+- `src/boundary_pinn/experiments/committor/periodic_two_well/comparison.py` runs the configured comparison, finite-difference reference, summary, and plots.
+- `experiments/committor/periodic_two_well/configs/` contains the CPU preflight and GPU pilot settings.
+
+See [the committor experiment guide](experiments/committor/periodic_two_well/README.md) for the output file map, metric definitions, provenance, and paper-result workflow.
 
 ## Citation
 

@@ -126,7 +126,8 @@ def _plot_losses(method_directories: dict[str, Path], destination: Path) -> None
         records = _read_metrics(run_directory / "metrics.jsonl")
         if records:
             axis.semilogy([item["epoch"] for item in records], [item["loss"] for item in records], label=method.replace("_", " "))
-    axis.set(xlabel="epoch", ylabel="training objective")
+    # The penalty baseline adds a weighted boundary term to its objective.
+    axis.set(xlabel="epoch", ylabel="training objective (method-specific)")
     axis.legend()
     figure.savefig(destination, dpi=180)
     plt.close(figure)
@@ -153,7 +154,13 @@ def _reference_convergence(
 
 
 def run_periodic_comparison(config_path: Path, output_dir: Path, *, resume: bool = False) -> None:
-    """Train all configured methods and save plots, checkpoints, and summary data."""
+    """Run the configured methods and save the comparison artifacts.
+
+    The output directory receives the config and metadata, the finest finite-
+    difference reference, per-method metrics and restart checkpoints, the
+    numerical summary, and diagnostic plots. Keep large run folders in results
+    storage, outside the source tree.
+    """
 
     raw = json.loads(config_path.read_text(encoding="utf-8"))
     methods = list(raw["methods"])
@@ -251,7 +258,7 @@ def run_periodic_comparison(config_path: Path, output_dir: Path, *, resume: bool
 
 
 def audit_saved_boundaries(output_dir: Path) -> Path:
-    """Check true boundary values of saved best checkpoints, using the CPU only."""
+    """Check saved best checkpoints on the true boundaries using CPU only.\n\n    Writes boundary_diagnostics.json beside the run files without retraining\n    or replacing the original summary.\n    """
     raw = json.loads((output_dir / "comparison_config.json").read_text(encoding="utf-8"))
     problem = PeriodicTwoWellCommittor(**raw["problem"])
     dtype = _dtype(str(raw["dtype"]))

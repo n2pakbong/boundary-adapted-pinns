@@ -118,6 +118,6 @@ def test_periodic_comparison_cpu_smoke(tmp_path, capsys) -> None:
         assert audit["methods"][method]["target_boundary_rmse"] < 1e-8
     captured = capsys.readouterr().out
     for method in config["methods"]:
-        assert f"{method}: epoch 1/1" in captured
+        assert f"{method} | epoch 1/1" in captured
     with pytest.raises(FileExistsError, match="already contains a run"):
         run_periodic_comparison(config_path, output_dir)

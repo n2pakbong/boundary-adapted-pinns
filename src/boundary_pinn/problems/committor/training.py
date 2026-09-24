@@ -210,10 +210,11 @@ def run_periodic_committor(
             if epoch == 1 or epoch % log_every == 0 or epoch == epochs:
                 metrics_file.write(json.dumps(record, sort_keys=True) + "\n")
                 metrics_file.flush()
+                # Stream the same fields saved in metrics.jsonl for live run progress (every log_every epochs).
                 print(
-                    f"{config.method}: epoch {epoch}/{epochs} "
-                    f"loss={loss_value:.6g} pde={record['pde_loss']:.6g} "
-                    f"boundary={record['boundary_loss']:.6g}",
+                    f"{config.method} | epoch {epoch}/{epochs} "
+                    f"objective={loss_value:.6g} | PDE loss={record['pde_loss']:.6g} | "
+                    f"boundary loss={record['boundary_loss']:.6g}",
                     flush=True,
                 )
 
