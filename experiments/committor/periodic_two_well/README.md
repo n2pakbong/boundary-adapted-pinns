@@ -214,8 +214,6 @@ periodic-committor experiments/committor/periodic_two_well/configs/gpu_pilot.jso
 
 Each dated GPU run folder contains `comparison_config.json`, `comparison_metadata.json`, the FDM reference `.npz`, shared `monte_carlo_labels.npz` and `.json`, `summary.json`, `losses.png`, diagnostic solution figures, and one folder per method. Each method folder contains its `metrics.jsonl`, `final_training_metrics.json`, `best.pt`, and resumable `last.pt`.
 
-Older completed folders from the three-method pilot are preserved as-is. Those runs used `boundary_adapted`, the naïve product, and a fixed-weight `penalty` baseline, without Monte Carlo solution-value data. CPU evaluation reports their saved solution errors and recorded final losses, marks the missing data term as absent, and does not alter or overwrite the old run. Their results should not be described as the five-method paper-aligned comparison.
-
 ## References
 
 - Liao, Y. and Ming, P. “Deep Nitsche Method: Deep Ritz Method with Essential Boundary Conditions.” *Communications in Computational Physics* 29(5) (2021), 1365–1384. [doi:10.4208/cicp.OA-2020-0219](https://doi.org/10.4208/cicp.OA-2020-0219).
