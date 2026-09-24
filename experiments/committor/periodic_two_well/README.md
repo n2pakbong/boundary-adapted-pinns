@@ -64,16 +64,16 @@ The five methods are:
 
 | Method | Trial function | Raw loss components | Boundary treatment |
 |---|---|---|---|
-| `simple_pinn` | $q_\theta=N_\theta$ | $L_{\rm PDE},L_{\rm MC},L_{\partial}$ | Standard sampled Dirichlet residual penalty. |
-| `boundary_adapted` | $q_\theta=g+\rho N_\theta$ | $L_{\rm PDE},L_{\rm MC}$ | Both values exact; no boundary penalty. |
-| `over_enforced` | $q_\theta=g+\rho^{3/2}N_\theta$ | $L_{\rm PDE},L_{\rm MC}$ | Both values exact; no boundary penalty. |
-| `under_enforced` | $q_\theta=g+\rho^{1/2}N_\theta$ | $L_{\rm PDE},L_{\rm MC}$ | Both values exact; no boundary penalty. |
-| `variational_nitsche` | $q_\theta=N_\theta$ | $L_{\rm weak},L_{\rm Nitsche},L_{\rm MC}$ | Weak imposition with Nitsche consistency, symmetry, and stabilization terms. |
+| `simple_pinn` | $q_\theta=N_\theta$ | $\widehat J_{\rm pde},\widehat J_{\rm data},\widehat J_{\rm bc}$ | Standard sampled Dirichlet residual penalty. |
+| `boundary_adapted` | $q_\theta=g+\rho N_\theta$ | $\widehat J_{\rm pde},\widehat J_{\rm data}$ | Both values exact; no boundary penalty. |
+| `over_enforced` | $q_\theta=g+\rho^{3/2}N_\theta$ | $\widehat J_{\rm pde},\widehat J_{\rm data}$ | Both values exact; no boundary penalty. |
+| `under_enforced` | $q_\theta=g+\rho^{1/2}N_\theta$ | $\widehat J_{\rm pde},\widehat J_{\rm data}$ | Both values exact; no boundary penalty. |
+| `variational_nitsche` | $q_\theta=N_\theta$ | $\widehat J_{\rm var},\widehat J_{\rm bc},\widehat J_{\rm data}$ | Weak imposition with Nitsche consistency, symmetry, and stabilization terms. |
 
 For the standard PINN only,
 
 $$
-L_{\partial}=\frac1{N_A}\sum_i q_\theta(x_i^A)^2+
+\widehat J_{\rm bc}=\frac1{N_A}\sum_i q_\theta(x_i^A)^2+
 \frac1{N_B}\sum_i(q_\theta(x_i^B)-1)^2.
 $$
 
@@ -101,16 +101,24 @@ This is the committor analogue of the pointwise Monte Carlo regularizer in the m
 
 ### Adaptive balancing and the logged losses
 
-The method notebooks use a trainable log-scale for each active named loss. Write $s_k=\log\sigma_k$. For the standard PINN, the exact objective is
+The paper writes adaptive loss balancing with the component notation $\widehat J_i$ and a positive trainable scale $\lambda_i$ [Tepakbong et al. (2026), Eq. (33)](https://arxiv.org/abs/2607.19167):
 
 $$
-\mathcal J_{\rm standard}
-=e^{-2s_{\rm pde}}\widehat J_{\rm pde}+s_{\rm pde}
-+e^{-2s_{\rm data}}\widehat J_{\rm data}+s_{\rm data}
-+e^{-2s_{\rm bc}}\widehat J_{\rm bc}+s_{\rm bc}.
+\mathcal J(\theta,\{\lambda_i\}_{i\in\mathcal I})
+=\sum_{i\in\mathcal I}\frac{1}{2\lambda_i^2}\widehat J_i(\theta)
++\sum_{i\in\mathcal I}\log\lambda_i,
+\qquad \lambda_i>0.
 $$
 
-An exact-boundary method omits the boundary term and its scale. For the variational method, $\widehat J_{\rm pde}$ is replaced by the weak-form loss $\widehat J_{\rm var}$, and $\widehat J_{\rm bc}$ is the Nitsche stabilization loss defined below. In the training records these are named pde_loss, data_loss, boundary_loss, nitsche_weak_loss, and nitsche_penalty_loss; the trainable parameters are the matching log_sigma_* values. The effective weight is $e^{-2s_k}=\sigma_k^{-2}$. This is the no-one-half convention used in the original training notebooks. The added $s_k$ terms mean that the optimized objective can be negative even though each raw mean-square loss is nonnegative. The trainable scale weighting follows the homoscedastic loss-balancing approach of [Kendall, Gal, and Cipolla (2018)](https://openaccess.thecvf.com/content_cvpr_2018/html/Kendall_Multi-Task_Learning_Using_CVPR_2018_paper.html).
+The active set $\mathcal I$ contains only the components trained by the selected method:
+
+- simple_pinn: $\{\mathrm{pde},\mathrm{bc},\mathrm{data}\}$, with $\widehat J_{\rm bc}$ the sampled Dirichlet residual.
+- boundary_adapted, over_enforced, and under_enforced: $\{\mathrm{pde},\mathrm{data}\}$. These exact-boundary methods have no boundary-residual component.
+- variational_nitsche: $\{\mathrm{var},\mathrm{bc},\mathrm{data}\}$, with $\widehat J_{\rm var}$ the Nitsche weak-residual loss and $\widehat J_{\rm bc}$ the Nitsche stabilization loss. Here $\widehat J_{\rm bc}$ is part of the variational boundary treatment, not the pointwise boundary residual used by simple_pinn.
+
+In this committor example, $\widehat J_{\rm pde}$ is the mean-square committor PDE residual and $\widehat J_{\rm data}$ is the mean-square difference from the simulated committor labels $\widehat q_i$. The implementation keeps its descriptive names for the Nitsche terms: nitsche_weak_loss is $\widehat J_{\rm var}$, and nitsche_penalty_loss is $\widehat J_{\rm bc}$. The latter is the Nitsche stabilization term only.
+
+**How the saved code scale matches the paper's $\lambda_i$.** To preserve existing checkpoint parameter names, the implementation stores $s_i=\log\sigma_i$ and computes each weighted component with multiplier $e^{-2s_i}$. The correspondence is $\lambda_i=e^{s_i}/\sqrt{2}$, so $e^{-2s_i}=1/(2\lambda_i^2)$. Consequently, the implementation's total objective differs from the displayed paper objective only by the constant $|\mathcal I|\log(2)/2$. This constant has no effect on the optimization; the effective component weights are exactly the paper coefficients. The raw losses and their reported values are unchanged. The trainable-scale idea is the uncertainty-weighted balancing described by [Kendall, Gal, and Cipolla (2018)](https://openaccess.thecvf.com/content_cvpr_2018/html/Kendall_Multi-Task_Learning_Using_CVPR_2018_paper.html).
 
 At the configured logging interval, training prints the epoch, objective, and active raw loss components. Each record, including weighted components and effective weights, is appended to metrics.jsonl. losses.png plots the objective and raw component histories. final_training_metrics.json and summary.json save final component values and the best epoch/objective.
 
@@ -207,7 +215,7 @@ Older completed folders from the three-method pilot are preserved as-is. Those r
 - Sukumar, N. and Srivastava, A. “Exact imposition of boundary conditions with distance functions in physics-informed deep neural networks.” *Computer Methods in Applied Mechanics and Engineering* 389 (2022), 114333. [doi:10.1016/j.cma.2021.114333](https://doi.org/10.1016/j.cma.2021.114333).
 - Berrone, S., Canuto, C., Pintore, M., and Sukumar, N. “Enforcing Dirichlet boundary conditions in physics-informed neural networks and variational physics-informed neural networks.” *Heliyon* 9(8) (2023), e18820. [doi:10.1016/j.heliyon.2023.e18820](https://doi.org/10.1016/j.heliyon.2023.e18820).
 - Tepakbong, N., Fan, J., Zhou, X., and Zhou, D.-X. “Boundary-Adapted PINNs for Elliptic Dirichlet Problems: $H^2(\Omega)$ A Priori Error Bounds with Application to Mean Escape Time Computation.” arXiv:2607.19167 (2026). [arXiv](https://arxiv.org/abs/2607.19167).
-- Khoo, Y., Lu, J., and Ying, L. “Solving for high dimensional committor functions using artificial neural networks.” arXiv:1802.10275 (2018).
-- Song, Z., Cameron, M. K., and Yang, H. “A Finite Expression Method for Solving High-Dimensional Committor Problems.” arXiv:2306.12268 (2023).
+- Khoo, Y., Lu, J., and Ying, L. “Solving for high dimensional committor functions using artificial neural networks.” [arXiv:1802.10275](https://arxiv.org/abs/1802.10275) (2018).
+- Song, Z., Cameron, M. K., and Yang, H. “A Finite Expression Method for Solving High-Dimensional Committor Problems.” [arXiv:2306.12268](https://arxiv.org/abs/2306.12268) (2023).
 
 BibTeX entries are in [`references.bib`](../../../references.bib).
