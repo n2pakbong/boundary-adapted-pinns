@@ -380,14 +380,22 @@ def test_loss_plot_handles_nonfinite_and_zero_series_without_log_warning(tmp_pat
     method_dir = tmp_path / "method"
     method_dir.mkdir()
     (method_dir / "metrics.jsonl").write_text(
-        '{"epoch": 1, "objective": Infinity, "pde_loss": 0.0}\n',
+        '{"epoch": 1, "objective": Infinity, "pde_loss": 0.0}\n'
+        '{"epoch": 2, "objective": Infinity, "pde_loss": 0.0}\n',
+        encoding="utf-8",
+    )
+    positive_method_dir = tmp_path / "positive_method"
+    positive_method_dir.mkdir()
+    (positive_method_dir / "metrics.jsonl").write_text(
+        '{"epoch": 1, "objective": 1.0, "pde_loss": 1.0}\n'
+        '{"epoch": 2, "objective": 2.0, "pde_loss": 0.0}\n',
         encoding="utf-8",
     )
     destination = tmp_path / "losses.png"
 
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        _plot_losses({"method": method_dir}, destination)
+        _plot_losses({"method": method_dir, "positive_method": positive_method_dir}, destination)
 
     assert destination.is_file()
     assert not any("no positive values" in str(warning.message).lower() for warning in caught)

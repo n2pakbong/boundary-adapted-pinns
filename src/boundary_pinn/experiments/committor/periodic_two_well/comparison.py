@@ -172,6 +172,7 @@ def _plot_losses(method_directories: dict[str, Path], destination: Path) -> None
     for axis, (field, label) in zip(axes[:, 0], panels):
         plotted = False
         methods_without_finite_values = []
+        finite_values_across_methods = []
         for method, records in records_by_method.items():
             available = [row for row in records if field in row]
             if available:
@@ -182,12 +183,11 @@ def _plot_losses(method_directories: dict[str, Path], destination: Path) -> None
                     methods_without_finite_values.append(method.replace("_", " "))
                     continue
                 # Keep gaps where a run recorded NaN/Inf, rather than connecting
-                # across them or passing a non-finite-only series to semilogy.
+                # across them. Plot on linear axes first so all methods share a
+                # scale decision for this panel.
                 plot_values = np.where(finite, values, np.nan)
-                if np.all(values[finite] > 0.0):
-                    axis.semilogy(epochs, plot_values, label=method.replace("_", " "))
-                else:
-                    axis.plot(epochs, plot_values, label=method.replace("_", " "))
+                finite_values_across_methods.extend(values[finite].tolist())
+                axis.plot(epochs, plot_values, label=method.replace("_", " "))
                 plotted = True
         if methods_without_finite_values:
             axis.text(
@@ -196,6 +196,11 @@ def _plot_losses(method_directories: dict[str, Path], destination: Path) -> None
                 transform=axis.transAxes, va="bottom", fontsize="small",
             )
             plotted = True
+        # Use a log scale only when every finite value in the shared panel is
+        # safely positive. Zero/negative/subnormal values remain readable on a
+        # linear scale and cannot trigger Matplotlib's empty-log-axis warning.
+        if finite_values_across_methods and min(finite_values_across_methods) >= np.finfo(float).tiny:
+            axis.set_yscale("log")
         axis.set(xlabel="epoch", ylabel=label)
         if plotted:
             axis.legend()
