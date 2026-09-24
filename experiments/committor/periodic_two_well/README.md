@@ -82,7 +82,7 @@ The pilot output folder contains:
 | `<method>/last.pt` | Most recent model, optimizer, scheduler, and random-number state, used only to resume. Saved at epoch 1, every 100 epochs, and at the final epoch. |
 | `<method>/config.json`, `metadata.json` | Method-specific settings and Python/PyTorch/device information. |
 
-For the existing pilot made before Git-revision metadata was added, the original revision is the SHA printed by its Setup cell. New runs save it automatically. The CPU boundary audit writes its corrected diagnostic to a separate JSON file, leaving the historical `summary.json` unchanged.
+For the existing pilot made before Git-revision metadata was added, the notebook's CPU audit asks for the SHA printed by that run's Setup cell and stores it with the corrected boundary diagnostics. New runs save the revision automatically. The audit writes a separate JSON file and leaves the historical `summary.json` unchanged.
 
 ## How to read the comparisons
 

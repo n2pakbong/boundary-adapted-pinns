@@ -257,7 +257,9 @@ def run_periodic_comparison(config_path: Path, output_dir: Path, *, resume: bool
 
 
 
-def audit_saved_boundaries(output_dir: Path) -> Path:
+def audit_saved_boundaries(
+    output_dir: Path, *, training_git_revision: str | None = None
+) -> Path:
     """Check saved best checkpoints on the true boundaries using CPU only.\n\n    Writes boundary_diagnostics.json beside the run files without retraining\n    or replacing the original summary.\n    """
     raw = json.loads((output_dir / "comparison_config.json").read_text(encoding="utf-8"))
     problem = PeriodicTwoWellCommittor(**raw["problem"])
@@ -288,7 +290,7 @@ def audit_saved_boundaries(output_dir: Path) -> Path:
     write_json(destination, {
         "points_per_boundary": 512,
         "sample_seed": 0,
-        "training_git_revision": metadata.get("git_revision"),
+        "training_git_revision": training_git_revision or metadata.get("git_revision"),
         "audit_git_revision": _git_revision(),
         "methods": methods,
     })
@@ -305,12 +307,18 @@ def main() -> None:
         "--audit-boundaries", action="store_true",
         help="Check saved best.pt models at the true boundaries using the CPU; never train",
     )
+    parser.add_argument(
+        "--training-git-revision",
+        help="Original run revision when auditing an older run without revision metadata",
+    )
     args = parser.parse_args()
     if args.audit_boundaries:
         if args.resume or args.config is not None:
             parser.error("--audit-boundaries uses only --output-dir")
-        audit_saved_boundaries(args.output_dir)
+        audit_saved_boundaries(args.output_dir, training_git_revision=args.training_git_revision)
         return
+    if args.training_git_revision is not None:
+        parser.error("--training-git-revision can only be used with --audit-boundaries")
     if args.config is None:
         parser.error("config is required for training")
     run_periodic_comparison(args.config, args.output_dir, resume=args.resume)
