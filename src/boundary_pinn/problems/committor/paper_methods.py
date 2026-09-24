@@ -260,11 +260,11 @@ def nitsche_committor_losses(
     gamma: float,
     h: float,
 ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
-    """Evaluate Gaussian weak residual and symmetric Nitsche penalty terms.
+    """Evaluate paper-aligned interior-plus-flux and Nitsche boundary loss components.
 
     The reversible density is m=exp(-V/epsilon), so
-    Lq=0 is equivalent to div(epsilon*m*grad(q))=0.  The returned first dict
-    contains signed per-test terms; the second contains their squared means.
+    Lq=0 is equivalent to div(epsilon*m*grad(q))=0.  The returned first dict contains signed per-test contributions; the second
+    contains the two squared loss components and diagnostic means.
     """
 
     if length_scale <= 0 or gamma <= 0 or h <= 0:
@@ -302,17 +302,22 @@ def nitsche_committor_losses(
             (gamma / h) * weighted_density.unsqueeze(0) * q_error.unsqueeze(0) * phi_b
         ).sum(dim=1)
 
-    weak_residual = volume + flux + consistency
+    pde_component = volume + flux
+    boundary_component = consistency + penalty
+    weak_residual = pde_component + boundary_component
     terms = {
         "volume_term": volume,
         "boundary_flux_term": flux,
         "nitsche_consistency_term": consistency,
         "nitsche_penalty_term": penalty,
+        "pde_component": pde_component,
+        "boundary_component": boundary_component,
         "weak_residual": weak_residual,
     }
     losses = {
-        "nitsche_weak_loss": weak_residual.square().mean(),
-        "nitsche_penalty_loss": penalty.square().mean(),
+        "pde_loss": pde_component.square().mean(),
+        "boundary_loss": boundary_component.square().mean(),
+        "full_weak_residual_mse": weak_residual.square().mean(),
         "volume_term_mse": volume.square().mean(),
         "boundary_flux_term_mse": flux.square().mean(),
         "nitsche_consistency_term_mse": consistency.square().mean(),

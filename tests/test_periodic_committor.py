@@ -232,14 +232,14 @@ def test_paper_method_ansatzes_enforce_boundary_only_when_they_should() -> None:
     assert torch.max(torch.abs(simple(target) - 1.0)) > 1e-6
 
 
-def test_nitsche_weak_and_penalty_terms_are_differentiable() -> None:
+def test_nitsche_paper_losses_split_interior_flux_and_boundary_terms() -> None:
     from boundary_pinn.problems.committor.paper_methods import nitsche_committor_losses
 
     problem = _problem()
     model = PeriodicMLP(MLP(input_dim=4, width=8, depth=2)).to(dtype=torch.float64)
     volume = problem.sample_interior(8, device="cpu", dtype=torch.float64)
     centers = problem.sample_interior(2, device="cpu", dtype=torch.float64)
-    _, losses = nitsche_committor_losses(
+    terms, losses = nitsche_committor_losses(
         model,
         problem,
         volume_points=volume,
@@ -250,11 +250,17 @@ def test_nitsche_weak_and_penalty_terms_are_differentiable() -> None:
         gamma=10.0,
         h=0.1,
     )
-    objective = losses["nitsche_weak_loss"] + losses["nitsche_penalty_loss"]
-    assert torch.isfinite(objective)
+    expected_pde = terms["volume_term"] + terms["boundary_flux_term"]
+    expected_boundary = terms["nitsche_consistency_term"] + terms["nitsche_penalty_term"]
+    assert torch.allclose(terms["pde_component"], expected_pde)
+    assert torch.allclose(terms["boundary_component"], expected_boundary)
+    assert torch.allclose(terms["weak_residual"], expected_pde + expected_boundary)
+    assert torch.allclose(losses["pde_loss"], expected_pde.square().mean())
+    assert torch.allclose(losses["boundary_loss"], expected_boundary.square().mean())
+    assert torch.isfinite(losses["full_weak_residual_mse"])
+    objective = losses["pde_loss"] + losses["boundary_loss"]
     objective.backward()
     assert any(parameter.grad is not None for parameter in model.parameters())
-
 
 def test_five_paper_methods_report_every_final_loss_component_on_cpu(tmp_path, monkeypatch) -> None:
     import json
@@ -328,9 +334,12 @@ def test_five_paper_methods_report_every_final_loss_component_on_cpu(tmp_path, m
         assert summary["methods"][method]["source_boundary_rmse"] < 1e-6
         assert summary["methods"][method]["target_boundary_rmse"] < 1e-6
     nitsche = summary["methods"]["variational_nitsche"]["final_training_metrics"]["raw_loss_components"]
-    assert {"nitsche_weak_loss", "nitsche_penalty_loss", "volume_term_mse",
-            "boundary_flux_term_mse", "nitsche_consistency_term_mse",
-            "nitsche_penalty_term_mse"} <= set(nitsche)
+    assert {"pde_loss", "boundary_loss", "data_loss", "full_weak_residual_mse",
+            "volume_term_mse", "boundary_flux_term_mse",
+            "nitsche_consistency_term_mse", "nitsche_penalty_term_mse"} <= set(nitsche)
+    assert set(summary["methods"]["variational_nitsche"]["final_training_metrics"]["adaptive_loss_weights"]) == {
+        "pde_loss", "boundary_loss", "data_loss"
+    }
 
 
 def test_cpu_preparation_uses_no_cuda_even_when_training_config_requests_it(tmp_path, monkeypatch) -> None:

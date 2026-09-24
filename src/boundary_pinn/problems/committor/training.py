@@ -183,13 +183,26 @@ def run_periodic_committor(
     dtype = _dtype(config.dtype)
     run_dir.mkdir(parents=True, exist_ok=True)
     problem = PeriodicTwoWellCommittor(**config.problem)
-    mc_data = _load_or_generate_mc_data(config, problem, run_dir, mc_data)
     uses_paper_objective = config.training.get("monte_carlo") is not None
-    if uses_paper_objective:
-        if config.method not in PAPER_METHODS:
-            raise ValueError("Monte Carlo objective requires one of the five paper methods")
-        if mc_data is None:
-            raise RuntimeError("Monte Carlo data could not be loaded or generated")
+    if uses_paper_objective and config.method not in PAPER_METHODS:
+        raise ValueError("Monte Carlo objective requires one of the five paper methods")
+    objective_version = (
+        "paper_methods_v2_nitsche_split"
+        if uses_paper_objective and config.method == "variational_nitsche"
+        else "paper_methods_v1" if uses_paper_objective else "legacy_pilot_v1"
+    )
+    metadata_path = run_dir / "metadata.json"
+    if resume and metadata_path.exists():
+        prior_version = json.loads(metadata_path.read_text(encoding="utf-8")).get("objective_version")
+        if prior_version != objective_version:
+            raise RuntimeError(
+                "This checkpoint uses objective version "
+                f"{prior_version!r}, but the selected method now uses {objective_version!r}. "
+                "Start a new run folder; the old checkpoint was not resumed."
+            )
+    mc_data = _load_or_generate_mc_data(config, problem, run_dir, mc_data)
+    if uses_paper_objective and mc_data is None:
+        raise RuntimeError("Monte Carlo data could not be loaded or generated")
     config_path = run_dir / "config.json"
     if not resume:
         _seed_everything(config.seed)
@@ -207,7 +220,7 @@ def run_periodic_committor(
             "torch": torch.__version__,
             "cuda_available": torch.cuda.is_available(),
             "device": str(requested_device),
-            "objective_version": "paper_methods_v1" if uses_paper_objective else "legacy_pilot_v1",
+            "objective_version": objective_version,
         })
     elif not config_path.exists():
         raise FileNotFoundError(f"Cannot resume: {config_path} is missing.")
@@ -220,7 +233,7 @@ def run_periodic_committor(
         "boundary_adapted": ("pde_loss", "data_loss"),
         "over_enforced": ("pde_loss", "data_loss"),
         "under_enforced": ("pde_loss", "data_loss"),
-        "variational_nitsche": ("nitsche_weak_loss", "nitsche_penalty_loss", "data_loss"),
+        "variational_nitsche": ("pde_loss", "boundary_loss", "data_loss"),
     }
     loss_scales = None
     if uses_paper_objective:
@@ -297,8 +310,8 @@ def run_periodic_committor(
                     gamma=float(weak["gamma"]),
                     h=float(weak["h"]),
                 )
-                losses["nitsche_weak_loss"] = weak_losses["nitsche_weak_loss"]
-                losses["nitsche_penalty_loss"] = weak_losses["nitsche_penalty_loss"]
+                losses["pde_loss"] = weak_losses["pde_loss"]
+                losses["boundary_loss"] = weak_losses["boundary_loss"]
                 diagnostics.update({
                     name: value for name, value in weak_losses.items() if name.endswith("_mse")
                 })

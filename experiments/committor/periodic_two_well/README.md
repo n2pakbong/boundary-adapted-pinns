@@ -68,7 +68,7 @@ The five methods are:
 | `boundary_adapted` | $q_\theta=g+\rho N_\theta$ | $\widehat J_{\rm pde},\widehat J_{\rm data}$ | Both values exact; no boundary penalty. |
 | `over_enforced` | $q_\theta=g+\rho^{3/2}N_\theta$ | $\widehat J_{\rm pde},\widehat J_{\rm data}$ | Both values exact; no boundary penalty. |
 | `under_enforced` | $q_\theta=g+\rho^{1/2}N_\theta$ | $\widehat J_{\rm pde},\widehat J_{\rm data}$ | Both values exact; no boundary penalty. |
-| `variational_nitsche` | $q_\theta=N_\theta$ | $\widehat J_{\rm var},\widehat J_{\rm bc},\widehat J_{\rm data}$ | Weak imposition with Nitsche consistency, symmetry, and stabilization terms. |
+| `variational_nitsche` | $q_\theta=N_\theta$ | $\widehat J_{\rm pde},\widehat J_{\rm bc},\widehat J_{\rm data}$ | Weak imposition with Nitsche consistency, symmetry, and stabilization terms. |
 
 For the standard PINN only,
 
@@ -101,58 +101,63 @@ This is the committor analogue of the pointwise Monte Carlo regularizer in the m
 
 ### Adaptive balancing and the logged losses
 
-The paper writes adaptive loss balancing with the component notation $\widehat J_i$ and a positive trainable scale $\lambda_i$ [Tepakbong et al. (2026), Eq. (33)](https://arxiv.org/abs/2607.19167):
+The paper denotes the total adaptive objective by $\widehat J$ and its active empirical loss components by $\widehat J_i$. For each component, $\lambda_i>0$ is a trainable scale [Tepakbong et al. (2026), Eq. (33)](https://arxiv.org/abs/2607.19167):
 
 $$
-\mathcal J(\theta,\{\lambda_i\}_{i\in\mathcal I})
+\widehat J(\theta,\{\lambda_i\}_{i\in\mathcal I})
 =\sum_{i\in\mathcal I}\frac{1}{2\lambda_i^2}\widehat J_i(\theta)
-+\sum_{i\in\mathcal I}\log\lambda_i,
-\qquad \lambda_i>0.
++\sum_{i\in\mathcal I}\log\lambda_i.
 $$
 
-The active set $\mathcal I$ contains only the components trained by the selected method:
+The active components match the paper's method-specific choices:
 
-- simple_pinn: $\{\mathrm{pde},\mathrm{bc},\mathrm{data}\}$, with $\widehat J_{\rm bc}$ the sampled Dirichlet residual.
-- boundary_adapted, over_enforced, and under_enforced: $\{\mathrm{pde},\mathrm{data}\}$. These exact-boundary methods have no boundary-residual component.
-- variational_nitsche: $\{\mathrm{var},\mathrm{bc},\mathrm{data}\}$, with $\widehat J_{\rm var}$ the Nitsche weak-residual loss and $\widehat J_{\rm bc}$ the Nitsche stabilization loss. Here $\widehat J_{\rm bc}$ is part of the variational boundary treatment, not the pointwise boundary residual used by simple_pinn.
+- simple_pinn: $\mathcal I=\{\mathrm{pde},\mathrm{bc},\mathrm{data}\}$; $\widehat J_{\rm bc}$ is the sampled Dirichlet residual.
+- boundary_adapted, over_enforced, and under_enforced: $\mathcal I=\{\mathrm{pde},\mathrm{data}\}$; the boundary values are exact and there is no boundary-residual loss.
+- variational_nitsche: $\mathcal I=\{\mathrm{pde},\mathrm{bc},\mathrm{data}\}$; $\widehat J_{\rm pde}$ is the interior-plus-flux loss and $\widehat J_{\rm bc}$ is the Nitsche boundary contribution, including symmetric consistency and stabilization. This is not the pointwise boundary loss used by simple_pinn.
 
-In this committor example, $\widehat J_{\rm pde}$ is the mean-square committor PDE residual and $\widehat J_{\rm data}$ is the mean-square difference from the simulated committor labels $\widehat q_i$. The implementation keeps its descriptive names for the Nitsche terms: nitsche_weak_loss is $\widehat J_{\rm var}$, and nitsche_penalty_loss is $\widehat J_{\rm bc}$. The latter is the Nitsche stabilization term only.
+For this committor, $\widehat J_{\rm pde}$ uses the residual $\mathcal Lq_\theta=0$, and $\widehat J_{\rm data}$ compares $q_\theta(z_i)$ with the simulated committor label $\widehat q_i$. In the Nitsche method, the code records these three optimized components as pde_loss, boundary_loss, and data_loss.
 
-**How the saved code scale matches the paper's $\lambda_i$.** To preserve existing checkpoint parameter names, the implementation stores $s_i=\log\sigma_i$ and computes each weighted component with multiplier $e^{-2s_i}$. The correspondence is $\lambda_i=e^{s_i}/\sqrt{2}$, so $e^{-2s_i}=1/(2\lambda_i^2)$. Consequently, the implementation's total objective differs from the displayed paper objective only by the constant $|\mathcal I|\log(2)/2$. This constant has no effect on the optimization; the effective component weights are exactly the paper coefficients. The raw losses and their reported values are unchanged. The trainable-scale idea is the uncertainty-weighted balancing described by [Kendall, Gal, and Cipolla (2018)](https://openaccess.thecvf.com/content_cvpr_2018/html/Kendall_Multi-Task_Learning_Using_CVPR_2018_paper.html).
+**How the saved code scale matches the paper's $\lambda_i$.** To preserve existing checkpoint parameter names, the implementation stores $s_i=\log\sigma_i$ and multiplies each loss by $e^{-2s_i}$. The correspondence is $\lambda_i=e^{s_i}/\sqrt{2}$, so $e^{-2s_i}=1/(2\lambda_i^2)$. Therefore the total code objective differs from the displayed paper objective only by the constant $|\mathcal I|\log(2)/2$. This constant has zero gradient; the component weights exactly equal the paper's coefficients. The raw losses and effective weights are reported separately. The trainable-scale idea follows [Kendall, Gal, and Cipolla (2018)](https://openaccess.thecvf.com/content_cvpr_2018/html/Kendall_Multi-Task_Learning_Using_CVPR_2018_paper.html).
 
 At the configured logging interval, training prints the epoch, objective, and active raw loss components. Each record, including weighted components and effective weights, is appended to metrics.jsonl. losses.png plots the objective and raw component histories. final_training_metrics.json and summary.json save final component values and the best epoch/objective.
 
 ### Variational/Nitsche formulation
 
-The drift is a gradient, so with $m(x)=e^{-V(x)/\varepsilon}$,
+Because the drift is a gradient, with $m(x)=e^{-V(x)/\varepsilon}$ the committor equation is equivalent to
 
 $$
 \mathcal Lq=0\quad\Longleftrightarrow\quad \nabla\cdot(\varepsilon m\nabla q)=0.
 $$
 
-For a periodic Gaussian test function centred at $c_j$,
+For periodic Gaussian test functions $\phi_j$ centred at $c_j$, let $n_D$ be the outward normal of the exterior domain $D$, pointing into the removed sets. The implementation separates the Nitsche residual into the paper's interior-plus-flux contribution and boundary contribution:
 
 $$
-\phi_j(x)=\exp\!\left[-\frac{4\sum_{k=1}^2\sin^2(\pi(x_k-c_{jk}))}{2\ell^2}\right],
+A_j=
+\varepsilon\int_Dm\nabla q_\theta\cdot\nabla\phi_j\,dx
+-\varepsilon\int_{\partial D}m\,\partial_{n_D}q_\theta\,\phi_j\,ds.
 $$
 
-integration by parts gives a volume term and a boundary flux term. With $n_D$ the outward normal of $D$ (pointing into the two removed sets), the symmetric Nitsche weak residual used for each test is
+The symmetric consistency term and stabilization moment are
 
 $$
-R_j=\varepsilon\int_D m\nabla q_\theta\cdot\nabla\phi_j\,dx
--\varepsilon\int_{\partial D}m\,\partial_{n_D}q_\theta\,\phi_j\,ds
--\varepsilon\int_{\partial D}m\,(q_\theta-g)\,\partial_{n_D}\phi_j\,ds,
+C_j=-\varepsilon\int_{\partial D}m(q_\theta-g)\,\partial_{n_D}\phi_j\,ds,
+\qquad
+P_j=\frac{\gamma\varepsilon}{h}\int_{\partial D}m(q_\theta-g)\phi_j\,ds,
 $$
 
-where $g=0$ on $\partial A$ and $g=1$ on $\partial B$. The first boundary term is the consistency (normal-flux) term; the second is the symmetric Nitsche term. The stabilization moment is
+where $g=0$ on $\partial A$ and $g=1$ on $\partial B$. They form the Nitsche boundary contribution $B_j=C_j+P_j$, and the full weak residual is $R_j=A_j+B_j$.
+
+The trained losses use the same split as the paper:
 
 $$
-P_j=\frac{\gamma\varepsilon}{h}\int_{\partial D}m\,(q_\theta-g)\phi_j\,ds.
+\widehat J_{\rm pde}=\frac1{N_\phi}\sum_{j=1}^{N_\phi}A_j^2,
+\qquad
+\widehat J_{\rm bc}=\frac1{N_\phi}\sum_{j=1}^{N_\phi}B_j^2.
 $$
 
-The implementation defines the variational and boundary components by $\widehat J_{\rm var}=N_\phi^{-1}\sum_jR_j^2$ and $\widehat J_{\rm bc}=N_\phi^{-1}\sum_jP_j^2$. It optimizes these two terms with $\widehat J_{\rm data}$ using the named log-scale objective above. `volume_term_mse`, `boundary_flux_term_mse`, `nitsche_consistency_term_mse`, and `nitsche_penalty_term_mse` are logged as diagnostics; these are squared component moments, while `nitsche_weak_loss` is the square of their signed weak residual sum. Volume integrals use uniform-in-domain Monte Carlo points with the estimated area of $D$; boundary integrals use radial-angle samples weighted by the curve's arclength Jacobian. The values of $\ell,\gamma,h$ and both sample counts are in the versioned config.
+These are optimized with the common pointwise committor-label loss $\widehat J_{\rm data}$. In the saved training records, these components are pde_loss, boundary_loss, and data_loss; their adaptive weights are the paper's $\lambda_{\rm pde}$, $\lambda_{\rm bc}$, and $\lambda_{\rm data}$ coefficients. The pointwise boundary-residual loss is not used by this Nitsche method. The separately logged volume, flux, consistency, stabilization, and full-residual mean squares are diagnostics, not additional adaptive losses. The Nitsche formulation follows [Liao and Ming (2021)](https://doi.org/10.4208/cicp.OA-2020-0219) and the variational PINN discussion in [Berrone et al. (2023)](https://doi.org/10.1016/j.heliyon.2023.e18820).
 
-Nitsche's method is a weak boundary-enforcement method. Its stabilization term is intentional and belongs to this variational method; it is not attached to `boundary_adapted`, `over_enforced`, or `under_enforced`.
+The values of $\ell,\gamma,h$ and the volume, test-function, and boundary sample counts are in the versioned config.
 
 ## Check the equations against the implementation
 
@@ -211,6 +216,7 @@ Older completed folders from the three-method pilot are preserved as-is. Those r
 
 ## References
 
+- Liao, Y. and Ming, P. “Deep Nitsche Method: Deep Ritz Method with Essential Boundary Conditions.” *Communications in Computational Physics* 29(5) (2021), 1365–1384. [doi:10.4208/cicp.OA-2020-0219](https://doi.org/10.4208/cicp.OA-2020-0219).
 - Raissi, M., Perdikaris, P., and Karniadakis, G. E. “Physics-informed neural networks: A deep learning framework for solving forward and inverse problems involving nonlinear partial differential equations.” *Journal of Computational Physics* 378 (2019), 686–707. [doi:10.1016/j.jcp.2018.10.045](https://doi.org/10.1016/j.jcp.2018.10.045).
 - Sukumar, N. and Srivastava, A. “Exact imposition of boundary conditions with distance functions in physics-informed deep neural networks.” *Computer Methods in Applied Mechanics and Engineering* 389 (2022), 114333. [doi:10.1016/j.cma.2021.114333](https://doi.org/10.1016/j.cma.2021.114333).
 - Berrone, S., Canuto, C., Pintore, M., and Sukumar, N. “Enforcing Dirichlet boundary conditions in physics-informed neural networks and variational physics-informed neural networks.” *Heliyon* 9(8) (2023), e18820. [doi:10.1016/j.heliyon.2023.e18820](https://doi.org/10.1016/j.heliyon.2023.e18820).
