@@ -256,12 +256,10 @@ def test_nitsche_weak_and_penalty_terms_are_differentiable() -> None:
     assert any(parameter.grad is not None for parameter in model.parameters())
 
 
-def test_five_paper_methods_report_every_final_loss_component_on_cpu(tmp_path) -> None:
+def test_five_paper_methods_report_every_final_loss_component_on_cpu(tmp_path, monkeypatch) -> None:
     import json
 
-    from boundary_pinn.experiments.committor.periodic_two_well.comparison import (
-        run_periodic_comparison,
-    )
+    from boundary_pinn.experiments.committor.periodic_two_well import comparison
 
     methods = [
         "simple_pinn", "boundary_adapted", "over_enforced", "under_enforced",
@@ -300,7 +298,18 @@ def test_five_paper_methods_report_every_final_loss_component_on_cpu(tmp_path) -
     config_path.write_text(json.dumps(config), encoding="utf-8")
     output_dir = tmp_path / "paper_run"
     output_dir.mkdir()
-    run_periodic_comparison(config_path, output_dir)
+    comparison.run_periodic_comparison(config_path, output_dir, prepare_only=True)
+    assert (output_dir / "cpu_preparation.json").is_file()
+    assert (output_dir / "reference_fd_64.npz").is_file()
+    assert (output_dir / "monte_carlo_labels.npz").is_file()
+    assert not (output_dir / "simple_pinn").exists()
+
+    def unexpected_cpu_preparation(*_args, **_kwargs):
+        pytest.fail("prepared GPU stage must reuse the CPU reference and labels")
+
+    monkeypatch.setattr(comparison, "_reference_convergence", unexpected_cpu_preparation)
+    monkeypatch.setattr(comparison, "generate_committor_mc_data", unexpected_cpu_preparation)
+    comparison.run_periodic_comparison(config_path, output_dir, train_prepared=True)
 
     summary = json.loads((output_dir / "summary.json").read_text(encoding="utf-8"))
     assert set(summary["methods"]) == set(methods)
@@ -322,3 +331,42 @@ def test_five_paper_methods_report_every_final_loss_component_on_cpu(tmp_path) -
     assert {"nitsche_weak_loss", "nitsche_penalty_loss", "volume_term_mse",
             "boundary_flux_term_mse", "nitsche_consistency_term_mse",
             "nitsche_penalty_term_mse"} <= set(nitsche)
+
+
+def test_cpu_preparation_uses_no_cuda_even_when_training_config_requests_it(tmp_path, monkeypatch) -> None:
+    import json
+
+    from boundary_pinn.experiments.committor.periodic_two_well import comparison
+
+    config = {
+        "seed": 7,
+        "device": "cuda",
+        "dtype": "float64",
+        "methods": ["simple_pinn"],
+        "problem": {
+            "a": 1.0, "b": 0.6, "epsilon": 0.4,
+            "source_center": [0.25, 0.0], "target_center": [0.75, 0.0],
+            "set_radius": 0.5,
+        },
+        "model": {"width": 4, "depth": 1, "activation": "tanh", "gain": 1.0},
+        "training": {"epochs": 1, "collocation_points": 8, "boundary_points": 4},
+        "reference_grid_sizes": [16, 32],
+        "evaluation_batch_size": 128,
+    }
+    config_path = tmp_path / "gpu_config.json"
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    output_dir = tmp_path / "prepared"
+    output_dir.mkdir()
+
+    def unexpected_cuda_check():
+        pytest.fail("CPU preparation must not query or initialize CUDA")
+
+    monkeypatch.setattr(torch.cuda, "is_available", unexpected_cuda_check)
+    with pytest.raises(ValueError, match="split into CPU preparation and GPU training"):
+        comparison.run_periodic_comparison(config_path, tmp_path / "unsafe_one_step")
+    comparison.run_periodic_comparison(config_path, output_dir, prepare_only=True)
+
+    preparation = json.loads((output_dir / "cpu_preparation.json").read_text(encoding="utf-8"))
+    assert preparation["reference_file"] == "reference_fd_32.npz"
+    assert not (output_dir / "simple_pinn").exists()
+    assert not (output_dir / "summary.json").exists()

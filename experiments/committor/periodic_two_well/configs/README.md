@@ -7,11 +7,17 @@ Each configuration fully specifies the methods, equation, model, optimizer, samp
 
 The methods are the standard PINN with a sampled boundary-residual loss; the boundary-adapted, over-enforced (`rho^(3/2)`), and under-enforced (`rho^(1/2)`) exact-boundary PINNs; and the variational/Nitsche PINN. The three exact-boundary methods have no separate boundary loss. The variational method has weak-residual, Nitsche-stabilization, and pointwise Monte Carlo data terms.
 
-The main Colab notebook runs the CPU preflight first. A full comparison outside Colab can be launched with:
+The Colab notebook runs Setup and the CPU preflight, then prepares the production finite-difference reference and Monte Carlo labels in a CPU runtime. Only after those saved inputs are complete does it use a GPU for network training and solution evaluation.
+
+For a terminal run, use the same output directory for both stages:
 
 ```bash
+RUN_DIR=runs/periodic_committor/gpu_pilot
 periodic-committor experiments/committor/periodic_two_well/configs/gpu_pilot.json \
-  --output-dir runs/periodic_committor/gpu_pilot
+  --output-dir "$RUN_DIR" --prepare-cpu-only
+# Run this second command in the GPU-enabled environment:
+periodic-committor experiments/committor/periodic_two_well/configs/gpu_pilot.json \
+  --output-dir "$RUN_DIR" --train-prepared
 ```
 
-See the parent experiment guide for the equations, precise loss definitions, estimator details, and output schema.
+The second command reuses `cpu_preparation.json`, the finite-difference reference, and the shared Monte Carlo labels; it does not repeat CPU preparation. The same folder receives checkpoints, live epoch records, final losses, solution errors, and plots. Use `--resume` with `--train-prepared` after an interrupted training run. See the parent experiment guide for the equations, estimator details, metrics, and output schema.

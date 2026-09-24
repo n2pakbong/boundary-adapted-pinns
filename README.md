@@ -35,11 +35,13 @@ The current Python examples are an Ornstein–Uhlenbeck mean escape time problem
 
 ## Running the periodic committor example
 
-The periodic committor is the maintained PINN example for a PDE with two separated Dirichlet boundaries. Its one Colab notebook explains the equation, boundary construction, CPU checks, GPU pilot, saved outputs, and how to resume:
+The periodic committor is the maintained PINN example for a PDE with two separated Dirichlet boundaries. Its Colab notebook explains the equation, boundary construction, five methods, loss terms, diagnostics, and saved files:
 
 [Open the periodic committor notebook in Colab](https://colab.research.google.com/github/n2pakbong/boundary-adapted-pinns/blob/main/colab/periodic_committor.ipynb)
 
-Run Setup and the CPU preflight before starting the GPU pilot. The pilot is a single-seed exploratory comparison, not a paper result. It writes the configuration, metrics, checkpoints, finite-difference reference, summary, and diagnostic plots to a timestamped folder in Google Drive. The notebook and experiment guide define all five paper formulations, their PDE, Monte Carlo data, standard boundary-residual, and Nitsche losses, and report both final loss components and absolute/relative L2, H1, and grid-estimated H2 solution errors against the finite-difference reference. The saved-checkpoint evaluation can be rerun on CPU, without repeating training.
+The notebook does not request a GPU at startup. Run Setup, the CPU tests, the CPU preflight, and the production reference/Monte Carlo preparation first. The Feynman–Kac path generation can take time; its step and resolution progress is shown live and the completed labels are saved to one dated Drive folder. Only after this CPU preparation finishes should you switch Colab to GPU and start network training. The GPU stage loads the saved reference and labels, so it does not occupy a GPU while generating them and does not repeat that CPU work. A runtime change clears temporary variables; Setup installs the same branch again, skips already-passed CPU tests in the GPU runtime, and the runner checks that the saved preparation matches the installed repository revision.
+
+The configured GPU comparison is a single-seed exploratory run, not a paper result. Its dated Drive folder retains the configuration, preparation metadata, finite-difference reference, Monte Carlo labels, training log, checkpoints, final loss components, solution-error summary, and diagnostic figures. The notebook and experiment guide define all five paper formulations and report absolute and relative L2, H1, and grid-estimated H2 errors against the finite-difference reference. Saved checkpoints can be reevaluated on CPU without retraining.
 
 For local CPU testing:
 

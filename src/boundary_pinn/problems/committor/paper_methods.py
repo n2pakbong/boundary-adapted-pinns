@@ -8,6 +8,7 @@ of the committor equation and Gaussian test functions on the flat torus.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import time
 
 import numpy as np
 import torch
@@ -82,7 +83,10 @@ def generate_committor_mc_data(
     rng = np.random.default_rng(seed + 1)
     noise_scale = np.sqrt(2.0 * problem.epsilon * dt)
 
-    progress_interval = max(1_000, max_steps // 10)
+    started = time.monotonic()
+    next_time_report = started + 10.0
+    progress_interval = max(1, max_steps // 20)
+    total_paths = n_anchors * paths_per_anchor
     for step in range(max_steps):
         anchor_ids, path_ids = np.nonzero(alive)
         if anchor_ids.size == 0:
@@ -103,12 +107,26 @@ def generate_committor_mc_data(
             np.add.at(resolved, anchor_ids[hit], 1)
             np.add.at(successes, anchor_ids[hit_b], 1)
             alive[anchor_ids[hit], path_ids[hit]] = False
-        if max_steps >= 10_000 and (step + 1) % progress_interval == 0:
+        now = time.monotonic()
+        at_step_milestone = (step + 1) % progress_interval == 0
+        at_time_milestone = now >= next_time_report
+        if max_steps >= 1_000 and (at_step_milestone or at_time_milestone):
+            fractions_now = resolved / float(paths_per_anchor)
+            anchors_ready = int(np.count_nonzero(fractions_now >= minimum_resolved_fraction))
+            elapsed = now - started
             print(
-                f"Monte Carlo label paths: step {step + 1}/{max_steps}; "
-                f"unresolved={int(alive.sum())}/{n_anchors * paths_per_anchor}",
+                "Feynman-Kac labels | "
+                f"step cap {step + 1:,}/{max_steps:,} ({100.0 * (step + 1) / max_steps:.1f}%) | "
+                f"paths hit A or B {int(resolved.sum()):,}/{total_paths:,} "
+                f"({100.0 * resolved.sum() / total_paths:.1f}%) | "
+                f"anchors meeting {minimum_resolved_fraction:.0%} resolution: "
+                f"{anchors_ready}/{n_anchors} | "
+                f"minimum/mean anchor resolution: {100.0 * fractions_now.min():.1f}%/"
+                f"{100.0 * fractions_now.mean():.1f}% | elapsed {elapsed / 60.0:.1f} min",
                 flush=True,
             )
+            if at_time_milestone:
+                next_time_report = now + 10.0
 
     unresolved = paths_per_anchor - resolved
     fractions = resolved / float(paths_per_anchor)
@@ -125,6 +143,14 @@ def generate_committor_mc_data(
             f"minimum {minimum_resolved_fraction:.1%}. Increase max_steps or "
             "revise the explicitly recorded estimator settings."
         )
+    elapsed_seconds = time.monotonic() - started
+    print(
+        "Feynman-Kac labels complete | "
+        f"paths hit A or B: {int(resolved.sum()):,}/{n_anchors * paths_per_anchor:,} | "
+        f"anchor resolution minimum/mean: {100.0 * fractions.min():.1f}%/"
+        f"{100.0 * fractions.mean():.1f}% | elapsed {elapsed_seconds / 60.0:.1f} min",
+        flush=True,
+    )
     estimates = successes / resolved
     standard_errors = np.sqrt(estimates * (1.0 - estimates) / resolved)
     metadata: dict[str, float | int | str] = {
@@ -139,6 +165,7 @@ def generate_committor_mc_data(
         "mean_resolved_fraction": float(fractions.mean()),
         "minimum_observed_resolved_fraction": float(fractions.min()),
         "unresolved_paths": int(unresolved.sum()),
+        "generation_elapsed_seconds": float(elapsed_seconds),
     }
     return CommittorMonteCarloData(
         anchors=torch.as_tensor(anchors, dtype=torch.float64),
