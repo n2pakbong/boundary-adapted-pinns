@@ -92,27 +92,223 @@ def solve_periodic_committor_fd(problem: object, grid_size: int = 128) -> Period
     )
 
 
+def _stencil_masks(domain: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Return masks for first- and second-derivative stencils inside the PDE domain."""
+    first = domain.copy()
+    for shift in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+        first &= np.roll(domain, shift=shift, axis=(0, 1))
+
+    # The mixed derivative uses the four diagonal nodes; the pure second
+    # derivatives use the axial nodes. Requiring the full 3x3 stencil makes
+    # every term in the H2 norm use the same set of physical grid points.
+    second = domain.copy()
+    for shift_x in (-1, 0, 1):
+        for shift_y in (-1, 0, 1):
+            second &= np.roll(domain, shift=(shift_x, shift_y), axis=(0, 1))
+    return first, second
+
+
+def _grid_derivatives(values: np.ndarray, spacing: float) -> tuple[np.ndarray, ...]:
+    """Compute periodic centered first and second derivatives on one grid."""
+    dx = (np.roll(values, -1, axis=0) - np.roll(values, 1, axis=0)) / (2.0 * spacing)
+    dy = (np.roll(values, -1, axis=1) - np.roll(values, 1, axis=1)) / (2.0 * spacing)
+    dxx = (np.roll(values, -1, axis=0) - 2.0 * values + np.roll(values, 1, axis=0)) / spacing**2
+    dyy = (np.roll(values, -1, axis=1) - 2.0 * values + np.roll(values, 1, axis=1)) / spacing**2
+    dxy = (
+        np.roll(np.roll(values, -1, axis=0), -1, axis=1)
+        - np.roll(np.roll(values, -1, axis=0), 1, axis=1)
+        - np.roll(np.roll(values, 1, axis=0), -1, axis=1)
+        + np.roll(np.roll(values, 1, axis=0), 1, axis=1)
+    ) / (4.0 * spacing**2)
+    return dx, dy, dxx, dxy, dyy
+
+
+def _weighted_norm(field: np.ndarray, mask: np.ndarray, spacing: float) -> float:
+    """Nodal quadrature approximation to an L2 norm on a masked 2D domain."""
+    return float(np.sqrt(spacing**2 * np.sum(np.square(field[mask]))))
+
+
+def _relative_error(error_norm: float, reference_norm: float) -> float | None:
+    """Return a relative error; use null when the reference norm is zero."""
+    if reference_norm == 0.0:
+        return 0.0 if error_norm == 0.0 else None
+    return float(error_norm / reference_norm)
+
+
+def _sobolev_error_metrics(
+    prediction: np.ndarray,
+    reference_values: np.ndarray,
+    spacing: float,
+    domain: np.ndarray,
+    first_stencil: np.ndarray,
+    second_stencil: np.ndarray,
+    prediction_derivatives: tuple[np.ndarray, ...] | None = None,
+    reference_derivatives: tuple[np.ndarray, ...] | None = None,
+) -> dict[str, float | None]:
+    """Compute discrete L2, H1, and H2 errors and their reference-relative values."""
+    if prediction_derivatives is None:
+        prediction_derivatives = _grid_derivatives(prediction, spacing)
+    if reference_derivatives is None:
+        reference_derivatives = _grid_derivatives(reference_values, spacing)
+
+    error = prediction - reference_values
+    derivative_errors = tuple(
+        pred - ref for pred, ref in zip(prediction_derivatives, reference_derivatives)
+    )
+    pred_dx, pred_dy, pred_dxx, pred_dxy, pred_dyy = prediction_derivatives
+    ref_dx, ref_dy, ref_dxx, ref_dxy, ref_dyy = reference_derivatives
+    error_dx, error_dy, error_dxx, error_dxy, error_dyy = derivative_errors
+
+    l2_error = _weighted_norm(error, domain, spacing)
+    l2_reference = _weighted_norm(reference_values, domain, spacing)
+
+    h1_semi_error = _weighted_norm(
+        np.sqrt(np.square(error_dx) + np.square(error_dy)), first_stencil, spacing
+    )
+    h1_semi_reference = _weighted_norm(
+        np.sqrt(np.square(ref_dx) + np.square(ref_dy)), first_stencil, spacing
+    )
+    h1_error = _weighted_norm(
+        np.sqrt(np.square(error) + np.square(error_dx) + np.square(error_dy)),
+        first_stencil,
+        spacing,
+    )
+    h1_reference = _weighted_norm(
+        np.sqrt(np.square(reference_values) + np.square(ref_dx) + np.square(ref_dy)),
+        first_stencil,
+        spacing,
+    )
+
+    h2_semi_error = _weighted_norm(
+        np.sqrt(np.square(error_dxx) + np.square(error_dxy) + np.square(error_dyy)),
+        second_stencil,
+        spacing,
+    )
+    h2_semi_reference = _weighted_norm(
+        np.sqrt(np.square(ref_dxx) + np.square(ref_dxy) + np.square(ref_dyy)),
+        second_stencil,
+        spacing,
+    )
+    h2_error = _weighted_norm(
+        np.sqrt(
+            np.square(error)
+            + np.square(error_dx)
+            + np.square(error_dy)
+            + np.square(error_dxx)
+            + np.square(error_dxy)
+            + np.square(error_dyy)
+        ),
+        second_stencil,
+        spacing,
+    )
+    h2_reference = _weighted_norm(
+        np.sqrt(
+            np.square(reference_values)
+            + np.square(ref_dx)
+            + np.square(ref_dy)
+            + np.square(ref_dxx)
+            + np.square(ref_dxy)
+            + np.square(ref_dyy)
+        ),
+        second_stencil,
+        spacing,
+    )
+
+    # Preserve the two historical RMS fields so existing analysis scripts keep
+    # working. The new *_abs values are the area-weighted Sobolev norms.
+    legacy_l2 = float(np.sqrt(np.mean(np.square(error[domain]))))
+    legacy_h1_semi = float(
+        np.sqrt(np.mean((np.square(error_dx) + np.square(error_dy))[first_stencil]))
+    )
+    return {
+        "grid_l2_abs": l2_error,
+        "grid_l2_rel": _relative_error(l2_error, l2_reference),
+        "grid_h1_abs": h1_error,
+        "grid_h1_rel": _relative_error(h1_error, h1_reference),
+        "grid_h1_seminorm_abs": h1_semi_error,
+        "grid_h1_seminorm_rel": _relative_error(h1_semi_error, h1_semi_reference),
+        "grid_h2_abs": h2_error,
+        "grid_h2_rel": _relative_error(h2_error, h2_reference),
+        "grid_h2_seminorm_abs": h2_semi_error,
+        "grid_h2_seminorm_rel": _relative_error(h2_semi_error, h2_semi_reference),
+        "grid_l2": legacy_l2,
+        "grid_h1_seminorm": legacy_h1_semi,
+    }
+
+
 def periodic_reference_errors(
     prediction: np.ndarray, reference: PeriodicCommittorReference
-) -> dict[str, float]:
-    """Return discrete L2 and H1 errors on stencils wholly in the open domain."""
+) -> dict[str, float | None]:
+    """Compare a grid prediction with the FDM solution in discrete Sobolev norms.
 
+    L2 uses every exterior-domain grid node. H1 derivatives use nodes whose
+    axial centered-difference stencil lies entirely in the domain. H2 uses
+    nodes whose complete 3x3 stencil lies in the domain. The quadrature weight
+    is h^2. The H2 seminorm convention is
+    sqrt(||e_xx||_L2^2 + ||e_xy||_L2^2 + ||e_yy||_L2^2).
+    Relative errors divide by the matching norm of the FDM reference on the
+    same grid and stencil mask. A relative error is null if that norm is zero.
+    """
     if prediction.shape != reference.values.shape:
         raise ValueError("prediction must have the reference grid shape")
-    domain = reference.domain
-    h = reference.spacing
-    l2 = np.sqrt(np.mean((prediction[domain] - reference.values[domain]) ** 2))
-    safe = domain.copy()
-    for axis in (0, 1):
-        safe &= np.roll(domain, 1, axis=axis) & np.roll(domain, -1, axis=axis)
-    if not np.any(safe):
+    first_stencil, second_stencil = _stencil_masks(reference.domain)
+    if not np.any(first_stencil):
         raise ValueError("no full interior stencils are available for H1 error")
-    gradient_error_square = np.zeros_like(prediction, dtype=float)
-    for axis in (0, 1):
-        pred_derivative = (np.roll(prediction, -1, axis=axis) - np.roll(prediction, 1, axis=axis)) / (2.0 * h)
-        ref_derivative = (
-            np.roll(reference.values, -1, axis=axis) - np.roll(reference.values, 1, axis=axis)
-        ) / (2.0 * h)
-        gradient_error_square += (pred_derivative - ref_derivative) ** 2
-    h1_seminorm = np.sqrt(np.mean(gradient_error_square[safe]))
-    return {"grid_l2": float(l2), "grid_h1_seminorm": float(h1_seminorm)}
+    if not np.any(second_stencil):
+        raise ValueError("no full interior stencils are available for H2 error")
+    return _sobolev_error_metrics(
+        prediction,
+        reference.values,
+        reference.spacing,
+        reference.domain,
+        first_stencil,
+        second_stencil,
+    )
+
+
+def periodic_reference_grid_errors(
+    coarse: PeriodicCommittorReference, fine: PeriodicCommittorReference
+) -> dict[str, float | None]:
+    """Estimate FDM grid change by comparing coarse and fine solutions in Sobolev norms.
+
+    Fine-grid derivatives are computed using the fine spacing before the fine
+    arrays are sampled at coarse-grid nodes. All norms use common domain and
+    stencil masks and the coarse-grid quadrature weight.
+    """
+    coarse_size = coarse.values.shape[0]
+    fine_size = fine.values.shape[0]
+    if coarse.values.ndim != 2 or coarse.values.shape[0] != coarse.values.shape[1]:
+        raise ValueError("reference grids must be square")
+    if fine.values.shape[0] != fine.values.shape[1] or fine_size % coarse_size:
+        raise ValueError("fine grid size must be an integer multiple of the coarse grid size")
+    stride = fine_size // coarse_size
+    if not np.allclose(coarse.grid, fine.grid[::stride, ::stride], rtol=0.0, atol=1.0e-12):
+        raise ValueError("coarse and fine grids do not share aligned periodic nodes")
+
+    coarse_first, coarse_second = _stencil_masks(coarse.domain)
+    fine_first, fine_second = _stencil_masks(fine.domain)
+    fine_domain = fine.domain[::stride, ::stride]
+    first_stencil = coarse_first & fine_first[::stride, ::stride]
+    second_stencil = coarse_second & fine_second[::stride, ::stride]
+    if not np.any(first_stencil) or not np.any(second_stencil):
+        raise ValueError("no common coarse/fine derivative stencils are available")
+    common_domain = coarse.domain & fine_domain
+
+    coarse_derivatives = _grid_derivatives(coarse.values, coarse.spacing)
+    fine_derivatives_full = _grid_derivatives(fine.values, fine.spacing)
+    fine_derivatives = tuple(item[::stride, ::stride] for item in fine_derivatives_full)
+    metrics = _sobolev_error_metrics(
+        coarse.values,
+        fine.values[::stride, ::stride],
+        coarse.spacing,
+        common_domain,
+        first_stencil,
+        second_stencil,
+        prediction_derivatives=coarse_derivatives,
+        reference_derivatives=fine_derivatives,
+    )
+    return {
+        f"fd_{name}_{coarse_size}_to_{fine_size}": value
+        for name, value in metrics.items()
+        if name.startswith("grid_") and name not in {"grid_l2", "grid_h1_seminorm"}
+    }

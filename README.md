@@ -29,28 +29,42 @@ pip install -e '.[dev]'
 pytest -q
 ```
 
-The package name is `boundary-pinn`; its import name is `boundary_pinn`. Shared network architectures and checkpoint utilities live at the package root. Problem definitions are grouped by equation type. Experiment-specific training and validation code remains identifiable with the problem it studies.
+The package name is `boundary-pinn`; its import name is `boundary_pinn`. Shared network architectures and checkpoint utilities live at the package root. Problem definitions are grouped by equation type. Experiment-specific training and validation code remains identifiable with the problem it studies. GitHub Actions runs the CPU test suite on each pull request; these checks test the proposed branch without merging it and never request a GPU.
 
 The current Python examples are an Ornstein–Uhlenbeck mean escape time problem on a disk and a periodic two-well committor. The code does not yet provide a turnkey solver for arbitrary PDEs. New PDE studies can reuse the shared architectures and numerical utilities while adding their own operator, domain, boundary conditions, experiment settings, tests, and reference solution.
 
 ## Running the periodic committor example
 
-The complete notebook explains each stage and saves results to Google Drive:
+The periodic committor is the maintained PINN example for a PDE with two separated Dirichlet boundaries. Its Colab notebook explains the equation, boundary construction, five methods, loss terms, diagnostics, and saved files:
 
-[`colab/periodic_committor.ipynb`](colab/periodic_committor.ipynb)
+[Open the periodic committor notebook in Colab](https://colab.research.google.com/github/n2pakbong/boundary-adapted-pinns/blob/main/colab/periodic_committor.ipynb)
 
-The CPU preflight exercises the full training, reference, checkpoint, and plotting pipeline with tiny settings. It does not use a GPU and is a wiring check. The GPU pilot is a separate cell in the same notebook and runs only when started explicitly.
+The notebook does not request a GPU at startup. Run Setup, the CPU tests, the CPU preflight, and the production reference/Monte Carlo preparation first. The Feynman–Kac path generation can take time; its step and resolution progress is shown live and the completed labels are saved to one dated Drive folder. Only after this CPU preparation finishes should you switch Colab to GPU and start network training. The GPU stage loads the saved reference and labels, so it does not occupy a GPU while generating them and does not repeat that CPU work. A runtime change clears temporary variables; Setup installs the same branch again, skips already-passed CPU tests in the GPU runtime, and the runner checks that the saved preparation matches the installed repository revision.
 
-For a local CPU preflight:
+The configured GPU comparison is a single-seed exploratory run, not a paper result. Its dated Drive folder retains the configuration, preparation metadata, finite-difference reference, Monte Carlo labels, training log, checkpoints, final loss components, solution-error summary, and diagnostic figures. The notebook and experiment guide define all five paper formulations and report absolute and relative L2, H1, and grid-estimated H2 errors against the finite-difference reference. Saved checkpoints can be reevaluated on CPU without retraining.
+
+For local CPU testing:
 
 ```bash
-periodic-committor experiments/committor/periodic_two_well/configs/preflight_comparison_cpu.json \
+pip install -e '.[dev]'
+pytest -q
+```
+
+For a small local end-to-end preflight:
+
+```bash
+periodic-committor experiments/committor/periodic_two_well/configs/cpu_preflight.json \
   --output-dir runs/periodic_committor/preflight
 ```
 
-For larger runs, edit or copy a versioned configuration and choose a result directory outside the source tree. Each run records its configuration, code revision, metrics, checkpoints, reference data, and figures. The finite-difference reference is checked at multiple grid resolutions; it is a numerical comparator whose convergence should be examined before interpreting errors.
+The experiment implementation is organized by purpose:
 
-When this repository is private, the Colab notebook uses a `GITHUB_TOKEN` Colab Secret to fetch the source from GitHub. That token is only for repository access; it is not used for training or Google Drive. Public access to the repository removes the need for a token.
+- `src/boundary_pinn/problems/committor/periodic_two_well.py` defines the PDE, periodic geometry, boundary sampling, and residual.
+- `src/boundary_pinn/problems/committor/training.py` defines the five named formulations, adaptive loss objective, live component logs, and restartable checkpoints.
+- `src/boundary_pinn/experiments/committor/periodic_two_well/comparison.py` runs the configured comparison, finite-difference reference, summary, and plots.
+- `experiments/committor/periodic_two_well/configs/` contains the CPU preflight and GPU pilot settings.
+
+See [the committor experiment guide](experiments/committor/periodic_two_well/README.md) for the output file map, metric definitions, provenance, and paper-result workflow.
 
 ## Citation
 
