@@ -171,16 +171,31 @@ def _plot_losses(method_directories: dict[str, Path], destination: Path) -> None
                                 squeeze=False, constrained_layout=True)
     for axis, (field, label) in zip(axes[:, 0], panels):
         plotted = False
+        methods_without_finite_values = []
         for method, records in records_by_method.items():
             available = [row for row in records if field in row]
             if available:
                 epochs = [row["epoch"] for row in available]
-                values = [float(row[field]) for row in available]
-                if min(values) > 0.0:
-                    axis.semilogy(epochs, values, label=method.replace("_", " "))
+                values = np.asarray([float(row[field]) for row in available], dtype=float)
+                finite = np.isfinite(values)
+                if not np.any(finite):
+                    methods_without_finite_values.append(method.replace("_", " "))
+                    continue
+                # Keep gaps where a run recorded NaN/Inf, rather than connecting
+                # across them or passing a non-finite-only series to semilogy.
+                plot_values = np.where(finite, values, np.nan)
+                if np.all(values[finite] > 0.0):
+                    axis.semilogy(epochs, plot_values, label=method.replace("_", " "))
                 else:
-                    axis.plot(epochs, values, label=method.replace("_", " "))
+                    axis.plot(epochs, plot_values, label=method.replace("_", " "))
                 plotted = True
+        if methods_without_finite_values:
+            axis.text(
+                0.01, 0.02,
+                "No finite values: " + ", ".join(methods_without_finite_values),
+                transform=axis.transAxes, va="bottom", fontsize="small",
+            )
+            plotted = True
         axis.set(xlabel="epoch", ylabel=label)
         if plotted:
             axis.legend()

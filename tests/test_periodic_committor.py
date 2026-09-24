@@ -370,3 +370,24 @@ def test_cpu_preparation_uses_no_cuda_even_when_training_config_requests_it(tmp_
     assert preparation["reference_file"] == "reference_fd_32.npz"
     assert not (output_dir / "simple_pinn").exists()
     assert not (output_dir / "summary.json").exists()
+
+
+def test_loss_plot_handles_nonfinite_and_zero_series_without_log_warning(tmp_path) -> None:
+    import warnings
+
+    from boundary_pinn.experiments.committor.periodic_two_well.comparison import _plot_losses
+
+    method_dir = tmp_path / "method"
+    method_dir.mkdir()
+    (method_dir / "metrics.jsonl").write_text(
+        '{"epoch": 1, "objective": Infinity, "pde_loss": 0.0}\n',
+        encoding="utf-8",
+    )
+    destination = tmp_path / "losses.png"
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        _plot_losses({"method": method_dir}, destination)
+
+    assert destination.is_file()
+    assert not any("no positive values" in str(warning.message).lower() for warning in caught)
