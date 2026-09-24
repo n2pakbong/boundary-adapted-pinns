@@ -3,9 +3,11 @@
   "device": "cuda",
   "dtype": "float64",
   "methods": [
+    "simple_pinn",
     "boundary_adapted",
-    "naive_product",
-    "penalty"
+    "over_enforced",
+    "under_enforced",
+    "variational_nitsche"
   ],
   "problem": {
     "a": 1.0,
@@ -25,15 +27,27 @@
     "epochs": 6000,
     "collocation_points": 1024,
     "boundary_points": 256,
-    "boundary_weight": 100.0,
     "learning_rate": 0.001,
     "lr_gamma": 0.9999,
     "checkpoint_every": 100,
-    "log_every": 20
+    "log_every": 20,
+    "monte_carlo": {
+      "n_anchors": 32,
+      "paths_per_anchor": 256,
+      "dt": 0.001,
+      "max_steps": 100000,
+      "seed": 1007,
+      "minimum_resolved_fraction": 0.9
+    },
+    "nitsche": {
+      "volume_points": 1024,
+      "test_functions": 32,
+      "boundary_points": 512,
+      "length_scale": 0.12,
+      "gamma": 10.0,
+      "h": 0.03
+    }
   },
-  "reference_grid_sizes": [
-    128,
-    256
-  ],
+  "reference_grid_sizes": [128, 256],
   "evaluation_batch_size": 16384
 }

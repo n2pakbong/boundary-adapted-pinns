@@ -39,7 +39,7 @@ The periodic committor is the maintained PINN example for a PDE with two separat
 
 [Open the periodic committor notebook in Colab](https://colab.research.google.com/github/n2pakbong/boundary-adapted-pinns/blob/main/colab/periodic_committor.ipynb)
 
-Run Setup and the CPU preflight before starting the GPU pilot. The pilot is a single-seed exploratory comparison, not a paper result. It writes the configuration, metrics, checkpoints, finite-difference reference, summary, and diagnostic plots to a timestamped folder in Google Drive. The notebook and experiment guide explain each file, define the PDE and boundary losses, and report absolute and relative L2, H1, and grid-estimated H2 solution errors against the finite-difference reference. The saved-checkpoint evaluation can be rerun on CPU, without repeating training.
+Run Setup and the CPU preflight before starting the GPU pilot. The pilot is a single-seed exploratory comparison, not a paper result. It writes the configuration, metrics, checkpoints, finite-difference reference, summary, and diagnostic plots to a timestamped folder in Google Drive. The notebook and experiment guide define all five paper formulations, their PDE, Monte Carlo data, standard boundary-residual, and Nitsche losses, and report both final loss components and absolute/relative L2, H1, and grid-estimated H2 solution errors against the finite-difference reference. The saved-checkpoint evaluation can be rerun on CPU, without repeating training.
 
 For local CPU testing:
 
@@ -58,7 +58,7 @@ periodic-committor experiments/committor/periodic_two_well/configs/cpu_preflight
 The experiment implementation is organized by purpose:
 
 - `src/boundary_pinn/problems/committor/periodic_two_well.py` defines the PDE, periodic geometry, boundary sampling, and residual.
-- `src/boundary_pinn/problems/committor/training.py` defines the three ansatzes, training loop, progress output, metrics, and restartable checkpoints.
+- `src/boundary_pinn/problems/committor/training.py` defines the five named formulations, adaptive loss objective, live component logs, and restartable checkpoints.
 - `src/boundary_pinn/experiments/committor/periodic_two_well/comparison.py` runs the configured comparison, finite-difference reference, summary, and plots.
 - `experiments/committor/periodic_two_well/configs/` contains the CPU preflight and GPU pilot settings.
 

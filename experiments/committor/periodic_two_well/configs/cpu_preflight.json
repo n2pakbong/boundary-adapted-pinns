@@ -3,9 +3,11 @@
   "device": "cpu",
   "dtype": "float64",
   "methods": [
+    "simple_pinn",
     "boundary_adapted",
-    "naive_product",
-    "penalty"
+    "over_enforced",
+    "under_enforced",
+    "variational_nitsche"
   ],
   "problem": {
     "a": 1.0,
@@ -16,24 +18,37 @@
     "set_radius": 0.5
   },
   "model": {
-    "width": 8,
-    "depth": 2,
+    "width": 4,
+    "depth": 1,
     "activation": "tanh",
     "gain": 1.0
   },
   "training": {
-    "epochs": 2,
-    "collocation_points": 32,
-    "boundary_points": 16,
-    "boundary_weight": 100.0,
+    "epochs": 1,
+    "collocation_points": 8,
+    "boundary_points": 4,
     "learning_rate": 0.001,
     "lr_gamma": 1.0,
     "checkpoint_every": 1,
-    "log_every": 1
+    "log_every": 1,
+    "monte_carlo": {
+      "n_anchors": 1,
+      "paths_per_anchor": 8,
+      "dt": 0.01,
+      "max_steps": 20,
+      "seed": 19,
+      "minimum_resolved_fraction": 0.5,
+      "anchor_points": [[0.34, 0.0]]
+    },
+    "nitsche": {
+      "volume_points": 8,
+      "test_functions": 2,
+      "boundary_points": 4,
+      "length_scale": 0.15,
+      "gamma": 10.0,
+      "h": 0.1
+    }
   },
-  "reference_grid_sizes": [
-    32,
-    64
-  ],
-  "evaluation_batch_size": 4096
+  "reference_grid_sizes": [32, 64],
+  "evaluation_batch_size": 512
 }

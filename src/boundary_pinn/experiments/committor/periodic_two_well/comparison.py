@@ -24,6 +24,10 @@ from ....problems.committor.reference import (
     periodic_reference_grid_errors,
     solve_periodic_committor_fd,
 )
+from ....problems.committor.paper_methods import (
+    CommittorMonteCarloData,
+    generate_committor_mc_data,
+)
 from ....problems.committor.training import (
     PeriodicCommittorConfig,
     _build_periodic_committor_model,
@@ -52,6 +56,30 @@ def _read_metrics(path: Path) -> list[dict[str, Any]]:
     if not path.exists():
         return []
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+
+
+def _saved_final_training_metrics(run_directory: Path) -> dict[str, Any]:
+    """Read final raw losses, distinguishing absent terms in older pilot runs."""
+    path = run_directory / "final_training_metrics.json"
+    if path.is_file():
+        return json.loads(path.read_text(encoding="utf-8"))
+    records = _read_metrics(run_directory / "metrics.jsonl")
+    if not records:
+        return {"available": False}
+    last = records[-1]
+    components = {
+        key: value for key, value in last.items()
+        if key.endswith("_loss") or key.endswith("_mse")
+    }
+    return {
+        "available": True,
+        "final_epoch": last.get("epoch"),
+        "final_training_objective": last.get("objective", last.get("loss")),
+        "raw_loss_components": components,
+        "data_loss": None,
+        "data_term_used": False,
+        "note": "This saved run predates Monte Carlo solution-value regularization.",
+    }
 
 
 def _evaluate(
@@ -126,14 +154,35 @@ def _plot_method(
 
 
 def _plot_losses(method_directories: dict[str, Path], destination: Path) -> None:
-    figure, axis = plt.subplots(figsize=(7, 4), constrained_layout=True)
-    for method, run_directory in method_directories.items():
-        records = _read_metrics(run_directory / "metrics.jsonl")
-        if records:
-            axis.semilogy([item["epoch"] for item in records], [item["loss"] for item in records], label=method.replace("_", " "))
-    # The penalty baseline adds a weighted boundary term to its objective.
-    axis.set(xlabel="epoch", ylabel="training objective (method-specific)")
-    axis.legend()
+    records_by_method = {
+        method: _read_metrics(directory / "metrics.jsonl")
+        for method, directory in method_directories.items()
+    }
+    components = sorted({
+        key for records in records_by_method.values() for row in records for key in row
+        if (key.endswith("_loss") or key.endswith("_mse"))
+        and key not in ("loss", "objective")
+        and not key.startswith("weighted_")
+    })
+    panels = [("objective", "total training objective")]
+    panels.extend((name, name.replace("_", " ")) for name in components)
+    figure, axes = plt.subplots(len(panels), 1, figsize=(8, 3.0 * len(panels)),
+                                squeeze=False, constrained_layout=True)
+    for axis, (field, label) in zip(axes[:, 0], panels):
+        plotted = False
+        for method, records in records_by_method.items():
+            available = [row for row in records if field in row]
+            if available:
+                epochs = [row["epoch"] for row in available]
+                values = [float(row[field]) for row in available]
+                if min(values) > 0.0:
+                    axis.semilogy(epochs, values, label=method.replace("_", " "))
+                else:
+                    axis.plot(epochs, values, label=method.replace("_", " "))
+                plotted = True
+        axis.set(xlabel="epoch", ylabel=label)
+        if plotted:
+            axis.legend()
     figure.savefig(destination, dpi=180)
     plt.close(figure)
 
@@ -207,6 +256,40 @@ def run_periodic_comparison(config_path: Path, output_dir: Path, *, resume: bool
     )
     print(f"Reference saved. Starting {len(methods)} model training runs.", flush=True)
 
+    shared_mc_data: CommittorMonteCarloData | None = None
+    mc_settings = raw["training"].get("monte_carlo")
+    if mc_settings is not None:
+        labels_path = output_dir / "monte_carlo_labels.npz"
+        labels_metadata_path = output_dir / "monte_carlo_labels.json"
+        if resume and labels_path.is_file() and labels_metadata_path.is_file():
+            with np.load(labels_path) as saved:
+                shared_mc_data = CommittorMonteCarloData(
+                    anchors=torch.as_tensor(saved["anchors"], dtype=torch.float64),
+                    values=torch.as_tensor(saved["values"], dtype=torch.float64),
+                    standard_errors=torch.as_tensor(saved["standard_errors"], dtype=torch.float64),
+                    resolved_paths=torch.as_tensor(saved["resolved_paths"], dtype=torch.int64),
+                    total_paths=torch.as_tensor(saved["total_paths"], dtype=torch.int64),
+                    metadata=json.loads(labels_metadata_path.read_text(encoding="utf-8")),
+                )
+            print("Reusing the saved common Monte Carlo labels.", flush=True)
+        else:
+            print(
+                "Estimating common pointwise committor labels on CPU "
+                f"({mc_settings['n_anchors']} anchors x {mc_settings['paths_per_anchor']} paths).",
+                flush=True,
+            )
+            shared_mc_data = generate_committor_mc_data(problem, **mc_settings)
+            np.savez_compressed(
+                labels_path,
+                anchors=shared_mc_data.anchors.numpy(),
+                values=shared_mc_data.values.numpy(),
+                standard_errors=shared_mc_data.standard_errors.numpy(),
+                resolved_paths=shared_mc_data.resolved_paths.numpy(),
+                total_paths=shared_mc_data.total_paths.numpy(),
+            )
+            write_json(labels_metadata_path, shared_mc_data.metadata)
+            print(f"Monte Carlo labels saved: {labels_path}", flush=True)
+
     requested_device = torch.device(str(raw["device"]))
     if requested_device.type == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("The comparison configuration requests CUDA but no CUDA device is available.")
@@ -233,7 +316,9 @@ def run_periodic_comparison(config_path: Path, output_dir: Path, *, resume: bool
         )
         method_resume = resume and (run_directory / "last.pt").exists()
         print(f"Starting {method} ({config.training['epochs']} epochs).", flush=True)
-        run_periodic_committor(config, run_directory, resume=method_resume)
+        final_training_metrics = run_periodic_committor(
+            config, run_directory, resume=method_resume, mc_data=shared_mc_data
+        )
         model = _build_periodic_committor_model(config, problem).to(device=requested_device, dtype=dtype)
         checkpoint = torch.load(run_directory / "best.pt", map_location=requested_device, weights_only=False)
         model.load_state_dict(checkpoint["model_state"])
@@ -241,6 +326,7 @@ def run_periodic_comparison(config_path: Path, output_dir: Path, *, resume: bool
         method_summary = {
             "best_epoch": int(checkpoint["epoch"]),
             "best_training_loss": float(checkpoint["best_loss"]),
+            "final_training_metrics": final_training_metrics,
             **periodic_reference_errors(prediction, reference),
             **_boundary_rmse(model, problem, device=requested_device, dtype=dtype),
         }
@@ -288,7 +374,7 @@ def evaluate_saved_models(
     batch_size = int(raw.get("evaluation_batch_size", 16_384))
     metadata_path = output_dir / "comparison_metadata.json"
     metadata = json.loads(metadata_path.read_text(encoding="utf-8")) if metadata_path.is_file() else {}
-    methods: dict[str, dict[str, float | int | None]] = {}
+    methods: dict[str, dict[str, Any]] = {}
 
     for method in raw["methods"]:
         config = PeriodicCommittorConfig(
@@ -312,6 +398,7 @@ def evaluate_saved_models(
         methods[method] = {
             "best_epoch": int(checkpoint["epoch"]),
             "best_training_objective": float(checkpoint["best_loss"]),
+            "final_training_metrics": _saved_final_training_metrics(output_dir / method),
             **periodic_reference_errors(prediction, reference),
             **_boundary_rmse(model, problem, device=device, dtype=dtype),
         }

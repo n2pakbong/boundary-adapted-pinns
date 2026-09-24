@@ -181,3 +181,144 @@ def test_periodic_comparison_cpu_smoke(tmp_path, capsys) -> None:
         assert f"{method} | epoch 1/1" in captured
     with pytest.raises(FileExistsError, match="already contains a run"):
         run_periodic_comparison(config_path, output_dir)
+
+
+def test_monte_carlo_committor_labels_are_reproducible_and_uncensored() -> None:
+    from boundary_pinn.problems.committor.paper_methods import generate_committor_mc_data
+
+    problem = _problem()
+    settings = {
+        "n_anchors": 1,
+        "paths_per_anchor": 8,
+        "dt": 0.01,
+        "max_steps": 20,
+        "seed": 19,
+        "minimum_resolved_fraction": 0.5,
+        "anchor_points": [[0.34, 0.0]],
+    }
+    first = generate_committor_mc_data(problem, **settings)
+    second = generate_committor_mc_data(problem, **settings)
+    assert torch.equal(first.anchors, second.anchors)
+    assert torch.equal(first.values, second.values)
+    assert first.values.shape == (1,)
+    assert 0.0 <= first.values.item() <= 1.0
+    assert first.metadata["minimum_observed_resolved_fraction"] >= 0.5
+
+
+def test_paper_method_ansatzes_enforce_boundary_only_when_they_should() -> None:
+    from boundary_pinn.problems.committor.training import (
+        PeriodicCommittorConfig,
+        _build_periodic_committor_model,
+    )
+
+    problem = _problem()
+    model_config = {"width": 8, "depth": 2, "activation": "tanh", "gain": 1.0}
+    for method in ("boundary_adapted", "over_enforced", "under_enforced"):
+        torch.manual_seed(7)
+        config = PeriodicCommittorConfig(7, "cpu", "float64", method, {}, model_config, {})
+        model = _build_periodic_committor_model(config, problem).to(dtype=torch.float64)
+        source = problem.sample_boundary("source", 12, device="cpu", dtype=torch.float64)
+        target = problem.sample_boundary("target", 12, device="cpu", dtype=torch.float64)
+        assert torch.max(torch.abs(model(source))) < 1e-6
+        assert torch.max(torch.abs(model(target) - 1.0)) < 1e-6
+
+    config = PeriodicCommittorConfig(
+        7, "cpu", "float64", "simple_pinn", {}, model_config, {}
+    )
+    simple = _build_periodic_committor_model(config, problem).to(dtype=torch.float64)
+    source = problem.sample_boundary("source", 12, device="cpu", dtype=torch.float64)
+    target = problem.sample_boundary("target", 12, device="cpu", dtype=torch.float64)
+    assert torch.max(torch.abs(simple(source))) > 1e-6
+    assert torch.max(torch.abs(simple(target) - 1.0)) > 1e-6
+
+
+def test_nitsche_weak_and_penalty_terms_are_differentiable() -> None:
+    from boundary_pinn.problems.committor.paper_methods import nitsche_committor_losses
+
+    problem = _problem()
+    model = PeriodicMLP(MLP(input_dim=4, width=8, depth=2)).to(dtype=torch.float64)
+    volume = problem.sample_interior(8, device="cpu", dtype=torch.float64)
+    centers = problem.sample_interior(2, device="cpu", dtype=torch.float64)
+    _, losses = nitsche_committor_losses(
+        model,
+        problem,
+        volume_points=volume,
+        test_centers=centers,
+        boundary_points=8,
+        domain_area=0.95,
+        length_scale=0.15,
+        gamma=10.0,
+        h=0.1,
+    )
+    objective = losses["nitsche_weak_loss"] + losses["nitsche_penalty_loss"]
+    assert torch.isfinite(objective)
+    objective.backward()
+    assert any(parameter.grad is not None for parameter in model.parameters())
+
+
+def test_five_paper_methods_report_every_final_loss_component_on_cpu(tmp_path) -> None:
+    import json
+
+    from boundary_pinn.experiments.committor.periodic_two_well.comparison import (
+        run_periodic_comparison,
+    )
+
+    methods = [
+        "simple_pinn", "boundary_adapted", "over_enforced", "under_enforced",
+        "variational_nitsche",
+    ]
+    config = {
+        "seed": 7,
+        "device": "cpu",
+        "dtype": "float64",
+        "methods": methods,
+        "problem": {
+            "a": 1.0, "b": 0.6, "epsilon": 0.4,
+            "source_center": [0.25, 0.0], "target_center": [0.75, 0.0],
+            "set_radius": 0.5,
+        },
+        "model": {"width": 4, "depth": 1, "activation": "tanh", "gain": 1.0},
+        "training": {
+            "epochs": 1, "collocation_points": 8, "boundary_points": 4,
+            "learning_rate": 0.001, "lr_gamma": 1.0,
+            "checkpoint_every": 1, "log_every": 1,
+            "monte_carlo": {
+                "n_anchors": 1, "paths_per_anchor": 8, "dt": 0.01,
+                "max_steps": 20, "seed": 19,
+                "minimum_resolved_fraction": 0.5,
+                "anchor_points": [[0.34, 0.0]],
+            },
+            "nitsche": {
+                "volume_points": 8, "test_functions": 2, "boundary_points": 4,
+                "length_scale": 0.15, "gamma": 10.0, "h": 0.1,
+            },
+        },
+        "reference_grid_sizes": [32, 64],
+        "evaluation_batch_size": 512,
+    }
+    config_path = tmp_path / "paper_cpu.json"
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    output_dir = tmp_path / "paper_run"
+    output_dir.mkdir()
+    run_periodic_comparison(config_path, output_dir)
+
+    summary = json.loads((output_dir / "summary.json").read_text(encoding="utf-8"))
+    assert set(summary["methods"]) == set(methods)
+    assert (output_dir / "monte_carlo_labels.npz").is_file()
+    assert (output_dir / "losses.png").is_file()
+    for method in methods:
+        final = summary["methods"][method]["final_training_metrics"]
+        raw = final["raw_loss_components"]
+        assert "data_loss" in raw
+        assert final["final_epoch"] == 1
+        assert (output_dir / method / "final_training_metrics.json").is_file()
+        assert (output_dir / method / "metrics.jsonl").is_file()
+    assert "boundary_loss" in summary["methods"]["simple_pinn"]["final_training_metrics"]["raw_loss_components"]
+    for method in ("boundary_adapted", "over_enforced", "under_enforced"):
+        assert "boundary_loss" not in summary["methods"][method]["final_training_metrics"]["raw_loss_components"]
+        assert summary["methods"][method]["source_boundary_rmse"] < 1e-6
+        assert summary["methods"][method]["target_boundary_rmse"] < 1e-6
+    nitsche = summary["methods"]["variational_nitsche"]["final_training_metrics"]["raw_loss_components"]
+    assert {"nitsche_weak_loss", "nitsche_penalty_loss", "volume_term_mse",
+            "boundary_flux_term_mse", "nitsche_consistency_term_mse",
+            "nitsche_penalty_term_mse"} <= set(nitsche)
