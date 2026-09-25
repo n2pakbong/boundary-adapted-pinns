@@ -323,7 +323,7 @@ def test_nitsche_paper_losses_split_interior_flux_and_boundary_terms() -> None:
     objective.backward()
     assert any(parameter.grad is not None for parameter in model.parameters())
 
-def test_five_paper_methods_report_every_final_loss_component_on_cpu(tmp_path, monkeypatch) -> None:
+def test_five_paper_methods_report_every_final_loss_component_on_cpu(tmp_path, monkeypatch, capsys) -> None:
     import json
 
     from boundary_pinn.experiments.committor.periodic_two_well import comparison
