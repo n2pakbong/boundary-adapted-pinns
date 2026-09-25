@@ -183,6 +183,67 @@ def test_periodic_comparison_cpu_smoke(tmp_path, capsys) -> None:
         run_periodic_comparison(config_path, output_dir)
 
 
+@pytest.mark.parametrize("activation", ["tanh", "relu", "gelu", "silu", "softplus"])
+@pytest.mark.parametrize("initialization", ["xavier_normal", "xavier_uniform"])
+def test_user_selectable_activation_and_initialization_are_finite(activation, initialization) -> None:
+    from boundary_pinn.problems.committor.training import _initialize_mlp
+
+    network = _initialize_mlp({
+        "width": 8,
+        "depth": 2,
+        "activation": activation,
+        "initialization": initialization,
+        "gain": 1.0,
+    }, input_dim=12)
+    network = network.to(dtype=torch.float64)
+    values = network(torch.randn(5, 12, dtype=torch.float64))
+    assert values.shape == (5,)
+    assert torch.isfinite(values).all()
+
+
+def test_periodic_fourier_mlp_is_periodic_for_multiple_integer_frequencies() -> None:
+    network = PeriodicMLP(
+        MLP(input_dim=12, width=8, depth=2),
+        frequencies=(1, 2, 4),
+    ).to(dtype=torch.float64)
+    points = torch.tensor([[0.11, 0.92], [0.68, 0.14]], dtype=torch.float64)
+    shifted = points + torch.tensor([2.0, -3.0], dtype=torch.float64)
+    assert torch.allclose(network(points), network(shifted), atol=1.0e-12)
+
+
+def test_optimizer_and_learning_rate_schedule_are_configurable() -> None:
+    from boundary_pinn.problems.committor.training import (
+        _build_optimizer,
+        _build_scheduler,
+    )
+
+    parameter = torch.nn.Parameter(torch.tensor(1.0))
+    training = {
+        "learning_rate": 0.01,
+        "optimizer": {
+            "name": "adamw",
+            "betas": [0.8, 0.95],
+            "eps": 1.0e-7,
+            "weight_decay": 0.001,
+            "amsgrad": True,
+        },
+        "scheduler": {
+            "name": "step",
+            "step_size_epochs": 5,
+            "gamma": 0.5,
+        },
+    }
+    optimizer = _build_optimizer([parameter], training)
+    scheduler = _build_scheduler(optimizer, training)
+    assert isinstance(optimizer, torch.optim.AdamW)
+    assert optimizer.param_groups[0]["lr"] == pytest.approx(0.01)
+    assert optimizer.param_groups[0]["betas"] == pytest.approx((0.8, 0.95))
+    assert optimizer.param_groups[0]["weight_decay"] == pytest.approx(0.001)
+    assert isinstance(scheduler, torch.optim.lr_scheduler.StepLR)
+    assert scheduler.step_size == 5
+    assert scheduler.gamma == pytest.approx(0.5)
+
+
 def test_monte_carlo_committor_labels_are_reproducible_and_uncensored() -> None:
     from boundary_pinn.problems.committor.paper_methods import generate_committor_mc_data
 
@@ -262,7 +323,7 @@ def test_nitsche_paper_losses_split_interior_flux_and_boundary_terms() -> None:
     objective.backward()
     assert any(parameter.grad is not None for parameter in model.parameters())
 
-def test_five_paper_methods_report_every_final_loss_component_on_cpu(tmp_path, monkeypatch) -> None:
+def test_five_paper_methods_report_every_final_loss_component_on_cpu(tmp_path, monkeypatch, capsys) -> None:
     import json
 
     from boundary_pinn.experiments.committor.periodic_two_well import comparison
@@ -285,11 +346,13 @@ def test_five_paper_methods_report_every_final_loss_component_on_cpu(tmp_path, m
         "training": {
             "epochs": 1, "collocation_points": 8, "boundary_points": 4,
             "learning_rate": 0.001, "lr_gamma": 1.0,
-            "checkpoint_every": 1, "log_every": 1,
+            "checkpoint_every": 1, "log_interval_seconds": 0.01,
             "monte_carlo": {
                 "n_anchors": 1, "paths_per_anchor": 8, "dt": 0.01,
                 "max_steps": 20, "seed": 19,
                 "minimum_resolved_fraction": 0.5,
+                "progress_interval_fraction": 0.01,
+                "progress_interval_seconds": 0.01,
                 "anchor_points": [[0.34, 0.0]],
             },
             "nitsche": {
@@ -320,7 +383,10 @@ def test_five_paper_methods_report_every_final_loss_component_on_cpu(tmp_path, m
     summary = json.loads((output_dir / "summary.json").read_text(encoding="utf-8"))
     assert set(summary["methods"]) == set(methods)
     assert (output_dir / "monte_carlo_labels.npz").is_file()
+    assert (output_dir / "monte_carlo_labels.json").is_file()
+    assert (output_dir / "monte_carlo_anchors.png").is_file()
     assert (output_dir / "losses.png").is_file()
+    assert "ETA " in capsys.readouterr().out
     for method in methods:
         final = summary["methods"][method]["final_training_metrics"]
         raw = final["raw_loss_components"]
@@ -328,6 +394,13 @@ def test_five_paper_methods_report_every_final_loss_component_on_cpu(tmp_path, m
         assert final["final_epoch"] == 1
         assert (output_dir / method / "final_training_metrics.json").is_file()
         assert (output_dir / method / "metrics.jsonl").is_file()
+        records = [
+            json.loads(line)
+            for line in (output_dir / method / "metrics.jsonl").read_text().splitlines()
+            if line.strip()
+        ]
+        assert records[-1]["session_elapsed_seconds"] >= 0.0
+        assert records[-1]["estimated_remaining_seconds"] >= 0.0
     assert "boundary_loss" in summary["methods"]["simple_pinn"]["final_training_metrics"]["raw_loss_components"]
     for method in ("boundary_adapted", "over_enforced", "under_enforced"):
         assert "boundary_loss" not in summary["methods"][method]["final_training_metrics"]["raw_loss_components"]
@@ -408,3 +481,107 @@ def test_loss_plot_handles_nonfinite_and_zero_series_without_log_warning(tmp_pat
 
     assert destination.is_file()
     assert not any("no positive values" in str(warning.message).lower() for warning in caught)
+
+
+
+def test_wall_clock_controls_console_only_and_metrics_keep_every_epoch(tmp_path, capsys) -> None:
+    import json
+
+    from boundary_pinn.problems.committor.training import (
+        PeriodicCommittorConfig,
+        run_periodic_committor,
+    )
+
+    config = PeriodicCommittorConfig(
+        seed=5,
+        device="cpu",
+        dtype="float64",
+        method="boundary_adapted",
+        problem={
+            "a": 1.0,
+            "b": 0.6,
+            "epsilon": 0.4,
+            "source_center": [0.25, 0.0],
+            "target_center": [0.75, 0.0],
+            "set_radius": 0.5,
+        },
+        model={
+            "width": 4,
+            "depth": 1,
+            "activation": "tanh",
+            "initialization": "xavier_normal",
+        },
+        training={
+            "epochs": 3,
+            "collocation_points": 8,
+            "learning_rate": 1e-3,
+            "optimizer": {"name": "adam"},
+            "scheduler": {"name": "constant"},
+            "checkpoint_every": 3,
+            "log_interval_seconds": 3600,
+        },
+    )
+    run_periodic_committor(config, tmp_path / "run")
+
+    records = [
+        json.loads(line)
+        for line in (tmp_path / "run" / "metrics.jsonl").read_text().splitlines()
+        if line.strip()
+    ]
+    assert [record["epoch"] for record in records] == [1, 2, 3]
+    output = capsys.readouterr().out
+    assert "epoch 1/3" in output
+    assert "epoch 2/3" not in output
+    assert "epoch 3/3" in output
+
+
+def test_comparison_settings_reject_silent_or_incomplete_controls() -> None:
+    from boundary_pinn.experiments.committor.periodic_two_well.comparison import (
+        _validate_comparison_config,
+    )
+
+    valid = {
+        "seed": 7,
+        "device": "cpu",
+        "dtype": "float64",
+        "methods": ["boundary_adapted"],
+        "problem": {
+            "a": 1.0,
+            "b": 0.6,
+            "epsilon": 0.4,
+            "source_center": [0.25, 0.0],
+            "target_center": [0.75, 0.0],
+            "set_radius": 0.5,
+        },
+        "model": {"width": 8, "depth": 2, "activation": "tanh"},
+        "training": {
+            "epochs": 2,
+            "collocation_points": 8,
+            "learning_rate": 1e-3,
+            "scheduler": {
+                "name": "step",
+                "step_size_epochs": 1,
+                "gamma": 0.5,
+            },
+        },
+        "reference_grid_sizes": [32, 64],
+    }
+    _validate_comparison_config(valid)
+
+    typo = {**valid, "training": {**valid["training"], "log_intervel_seconds": 10}}
+    with pytest.raises(ValueError, match="Unknown training setting"):
+        _validate_comparison_config(typo)
+
+    missing_gamma = {
+        **valid,
+        "training": {
+            **valid["training"],
+            "scheduler": {"name": "step", "step_size_epochs": 1},
+        },
+    }
+    with pytest.raises(ValueError, match="requires gamma"):
+        _validate_comparison_config(missing_gamma)
+
+    unsupported_device = {**valid, "device": "mps"}
+    with pytest.raises(ValueError, match="device must be 'cpu' or a CUDA device"):
+        _validate_comparison_config(unsupported_device)

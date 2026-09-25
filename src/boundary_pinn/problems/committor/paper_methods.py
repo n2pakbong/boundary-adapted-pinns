@@ -45,6 +45,8 @@ def generate_committor_mc_data(
     seed: int,
     minimum_resolved_fraction: float = 0.9,
     anchor_points: list[list[float]] | None = None,
+    progress_interval_fraction: float = 0.01,
+    progress_interval_seconds: float = 10.0,
 ) -> CommittorMonteCarloData:
     """Estimate committor values by capped, vectorized Euler--Maruyama paths.
 
@@ -59,6 +61,10 @@ def generate_committor_mc_data(
         raise ValueError("Monte Carlo counts and dt must be positive")
     if not 0.0 <= minimum_resolved_fraction <= 1.0:
         raise ValueError("minimum_resolved_fraction must lie in [0, 1]")
+    if not 0.0 < progress_interval_fraction <= 1.0:
+        raise ValueError("progress_interval_fraction must lie in (0, 1]")
+    if progress_interval_seconds <= 0.0:
+        raise ValueError("progress_interval_seconds must be positive")
 
     if anchor_points is None:
         anchor_generator = torch.Generator(device="cpu").manual_seed(int(seed))
@@ -84,8 +90,8 @@ def generate_committor_mc_data(
     noise_scale = np.sqrt(2.0 * problem.epsilon * dt)
 
     started = time.monotonic()
-    next_time_report = started + 10.0
-    progress_interval = max(1, max_steps // 20)
+    next_time_report = started + progress_interval_seconds
+    progress_interval = max(1, int(np.ceil(max_steps * progress_interval_fraction)))
     total_paths = n_anchors * paths_per_anchor
     for step in range(max_steps):
         anchor_ids, path_ids = np.nonzero(alive)
@@ -114,19 +120,22 @@ def generate_committor_mc_data(
             fractions_now = resolved / float(paths_per_anchor)
             anchors_ready = int(np.count_nonzero(fractions_now >= minimum_resolved_fraction))
             elapsed = now - started
+            resolved_b = int(successes.sum())
+            resolved_a = int(resolved.sum()) - resolved_b
+            active_now = int(alive.sum())
             print(
-                "Feynman-Kac labels | "
-                f"step cap {step + 1:,}/{max_steps:,} ({100.0 * (step + 1) / max_steps:.1f}%) | "
-                f"paths hit A or B {int(resolved.sum()):,}/{total_paths:,} "
-                f"({100.0 * resolved.sum() / total_paths:.1f}%) | "
-                f"anchors meeting {minimum_resolved_fraction:.0%} resolution: "
-                f"{anchors_ready}/{n_anchors} | "
-                f"minimum/mean anchor resolution: {100.0 * fractions_now.min():.1f}%/"
+                "Feynman-Kac paths | "
+                f"step cap {step + 1:,}/{max_steps:,} "
+                f"({100.0 * (step + 1) / max_steps:.1f}%) | "
+                f"resolved A/B {resolved_a:,}/{resolved_b:,} of {total_paths:,} | "
+                f"active {active_now:,} | "
+                f"anchors at ≥{minimum_resolved_fraction:.0%}: {anchors_ready}/{n_anchors} | "
+                f"resolution min/mean {100.0 * fractions_now.min():.1f}%/"
                 f"{100.0 * fractions_now.mean():.1f}% | elapsed {elapsed / 60.0:.1f} min",
                 flush=True,
             )
             if at_time_milestone:
-                next_time_report = now + 10.0
+                next_time_report = now + progress_interval_seconds
 
     unresolved = paths_per_anchor - resolved
     fractions = resolved / float(paths_per_anchor)
@@ -166,6 +175,8 @@ def generate_committor_mc_data(
         "minimum_observed_resolved_fraction": float(fractions.min()),
         "unresolved_paths": int(unresolved.sum()),
         "generation_elapsed_seconds": float(elapsed_seconds),
+        "progress_interval_fraction": float(progress_interval_fraction),
+        "progress_interval_seconds": float(progress_interval_seconds),
     }
     return CommittorMonteCarloData(
         anchors=torch.as_tensor(anchors, dtype=torch.float64),

@@ -30,6 +30,7 @@ from ....problems.committor.paper_methods import (
     generate_committor_mc_data,
 )
 from ....problems.committor.training import (
+    PAPER_METHODS,
     PeriodicCommittorConfig,
     _build_periodic_committor_model,
     _dtype,
@@ -150,6 +151,64 @@ def _plot_method(
         axis.set(title=title, xlabel="$x_1$", ylabel="$x_2$", aspect="equal")
         figure.colorbar(image, ax=axis, shrink=0.82)
     figure.suptitle(method.replace("_", " "))
+    figure.savefig(destination, dpi=180)
+    plt.close(figure)
+
+
+def _plot_monte_carlo_labels(
+    problem: PeriodicTwoWellCommittor,
+    data: CommittorMonteCarloData,
+    destination: Path,
+) -> None:
+    """Plot the sampled anchor locations and their noisy committor labels."""
+    anchors = data.anchors.detach().cpu().numpy()
+    values = data.values.detach().cpu().numpy()
+    errors = data.standard_errors.detach().cpu().numpy()
+    grid_axis = np.linspace(0.0, 1.0, 257)
+    grid_x, grid_y = np.meshgrid(grid_axis, grid_axis, indexing="ij")
+    grid_points = torch.as_tensor(
+        np.stack((grid_x.ravel(), grid_y.ravel()), axis=-1), dtype=torch.float64
+    )
+    source_level = problem.defining_function(
+        grid_points, problem.source_center
+    ).detach().cpu().numpy().reshape(grid_x.shape)
+    target_level = problem.defining_function(
+        grid_points, problem.target_center
+    ).detach().cpu().numpy().reshape(grid_x.shape)
+
+    figure, axes = plt.subplots(1, 2, figsize=(11, 4.5), constrained_layout=True)
+    scatter = axes[0].scatter(
+        anchors[:, 0], anchors[:, 1], c=values, cmap="viridis",
+        vmin=0.0, vmax=1.0, s=55, edgecolors="black", linewidths=0.45,
+    )
+    axes[0].contour(
+        grid_x, grid_y, source_level, levels=[0.0],
+        colors=["tab:blue"], linewidths=1.4,
+    )
+    axes[0].contour(
+        grid_x, grid_y, target_level, levels=[0.0],
+        colors=["tab:red"], linewidths=1.4,
+    )
+    axes[0].set(
+        title="Monte Carlo anchors colored by $\\widehat q_i$",
+        xlabel="$x_1$", ylabel="$x_2$", xlim=(0, 1), ylim=(0, 1), aspect="equal",
+    )
+    figure.colorbar(scatter, ax=axes[0], label="estimated committor $\\widehat q_i$")
+    anchor_index = np.arange(1, len(values) + 1)
+    axes[1].errorbar(
+        anchor_index, values, yerr=errors, fmt="o", markersize=3.5,
+        capsize=2, linewidth=0.8, color="tab:purple",
+    )
+    axes[1].set(
+        title="Label estimates and one standard error",
+        xlabel="anchor index", ylabel="$\\widehat q_i$",
+        xlim=(0, len(values) + 1), ylim=(-0.05, 1.05),
+    )
+    axes[1].grid(alpha=0.25)
+    figure.suptitle(
+        f"Feynman–Kac data before training: {len(values)} anchors, "
+        f"{data.metadata.get('paths_per_anchor', '?')} paths per anchor"
+    )
     figure.savefig(destination, dpi=180)
     plt.close(figure)
 
@@ -305,7 +364,10 @@ def _prepare_cpu_artifacts(
             total_paths=shared_mc_data.total_paths.numpy(),
         )
         write_json(output_dir / "monte_carlo_labels.json", shared_mc_data.metadata)
+        plot_path = output_dir / "monte_carlo_anchors.png"
+        _plot_monte_carlo_labels(problem, shared_mc_data, plot_path)
         print(f"Monte Carlo labels saved: {output_dir / 'monte_carlo_labels.npz'}", flush=True)
+        print(f"Monte Carlo anchor plot saved: {plot_path}", flush=True)
 
     write_json(output_dir / "cpu_preparation.json", {
         "completed_utc": datetime.now(timezone.utc).isoformat(),
@@ -315,6 +377,7 @@ def _prepare_cpu_artifacts(
         "reference_convergence": fd_diagnostics,
         "monte_carlo_file": "monte_carlo_labels.npz" if shared_mc_data is not None else None,
         "monte_carlo_metadata_file": "monte_carlo_labels.json" if shared_mc_data is not None else None,
+        "monte_carlo_plot_file": "monte_carlo_anchors.png" if shared_mc_data is not None else None,
         "config_file": "comparison_config.json",
     })
     print(f"CPU preparation complete: {output_dir}", flush=True)
@@ -372,6 +435,227 @@ def _load_cpu_preparation(
     return reference, diagnostics, shared_mc_data
 
 
+def _validate_comparison_config(raw: dict[str, Any]) -> None:
+    """Reject misspelled or incomplete controls before CPU preparation or training."""
+    def require_mapping(value: Any, label: str) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            raise ValueError(f"{label} must be a JSON object")
+        return value
+
+    def reject_unknown(section: dict[str, Any], allowed: set[str], label: str) -> None:
+        unknown = set(section) - allowed
+        if unknown:
+            raise ValueError(f"Unknown {label} setting(s): {', '.join(sorted(unknown))}")
+
+    raw = require_mapping(raw, "comparison configuration")
+    reject_unknown(
+        raw,
+        {
+            "seed", "device", "dtype", "methods", "problem", "model", "training",
+            "reference_grid_sizes", "evaluation_batch_size",
+        },
+        "top-level",
+    )
+    for required in ("seed", "device", "dtype", "methods", "problem", "model", "training"):
+        if required not in raw:
+            raise ValueError(f"Missing required comparison setting: {required}")
+    if raw["dtype"] not in {"float32", "float64"}:
+        raise ValueError("dtype must be float32 or float64")
+    device = str(raw["device"])
+    if device != "cpu" and not device.startswith("cuda"):
+        raise ValueError("device must be 'cpu' or a CUDA device such as 'cuda' or 'cuda:0'")
+    if not isinstance(raw["methods"], list) or not raw["methods"]:
+        raise ValueError("methods must be a nonempty list")
+    if len(set(raw["methods"])) != len(raw["methods"]):
+        raise ValueError("methods must not contain duplicates")
+    unknown_methods = set(raw["methods"]) - set((*PAPER_METHODS, "naive_product", "penalty"))
+    if unknown_methods:
+        raise ValueError(f"Unknown method(s): {', '.join(sorted(unknown_methods))}")
+
+    problem = require_mapping(raw["problem"], "problem")
+    reject_unknown(
+        problem,
+        {"a", "b", "epsilon", "source_center", "target_center", "set_radius"},
+        "problem",
+    )
+    model = require_mapping(raw["model"], "model")
+    reject_unknown(
+        model,
+        {
+            "architecture", "frequencies", "width", "depth", "activation",
+            "initialization", "gain",
+        },
+        "model",
+    )
+    architecture = str(model.get("architecture", "periodic_mlp")).lower()
+    if architecture not in {"periodic_mlp", "periodic_fourier_mlp"}:
+        raise ValueError("model.architecture must be 'periodic_mlp' or 'periodic_fourier_mlp'")
+    for key in ("width", "depth"):
+        value = float(model.get(key, 0))
+        if value < 1 or not value.is_integer():
+            raise ValueError(f"model.{key} must be a positive integer")
+    if str(model.get("activation", "tanh")).lower() not in {
+        "tanh", "relu", "gelu", "silu", "softplus",
+    }:
+        raise ValueError("model.activation must be tanh, relu, gelu, silu, or softplus")
+    if str(model.get("initialization", "xavier_normal")).lower() not in {
+        "xavier_normal", "xavier_uniform",
+    }:
+        raise ValueError("model.initialization must be xavier_normal or xavier_uniform")
+    if "gain" in model and float(model["gain"]) <= 0:
+        raise ValueError("model.gain must be positive")
+    if architecture == "periodic_fourier_mlp":
+        frequencies = model.get("frequencies", [1, 2, 4])
+        if not isinstance(frequencies, (list, tuple)) or not frequencies or any(
+            float(value) < 1 or not float(value).is_integer() for value in frequencies
+        ):
+            raise ValueError("model.frequencies must be a nonempty list of positive integers")
+    elif "frequencies" in model:
+        raise ValueError("model.frequencies is only used with periodic_fourier_mlp")
+
+    training = require_mapping(raw["training"], "training")
+    reject_unknown(
+        training,
+        {
+            "epochs", "collocation_points", "boundary_points", "boundary_weight",
+            "learning_rate", "lr_gamma", "optimizer", "scheduler", "checkpoint_every",
+            "log_interval_seconds", "log_every", "adaptive_loss_log_scale_init",
+            "monte_carlo", "nitsche",
+        },
+        "training",
+    )
+    for key in ("epochs", "collocation_points", "checkpoint_every"):
+        if key in training and int(training[key]) < 1:
+            raise ValueError(f"training.{key} must be positive")
+    if "boundary_points" in training and int(training["boundary_points"]) < 1:
+        raise ValueError("training.boundary_points must be positive")
+    if "learning_rate" in training and float(training["learning_rate"]) <= 0.0:
+        raise ValueError("training.learning_rate must be positive")
+    if "adaptive_loss_log_scale_init" in training and not np.isfinite(
+        float(training["adaptive_loss_log_scale_init"])
+    ):
+        raise ValueError("training.adaptive_loss_log_scale_init must be finite")
+    if "log_interval_seconds" in training and float(training["log_interval_seconds"]) <= 0.0:
+        raise ValueError("training.log_interval_seconds must be positive")
+    if "log_interval_seconds" in training and "log_every" in training:
+        raise ValueError(
+            "Set only training.log_interval_seconds for time-based reports; "
+            "training.log_every is supported only by older configurations."
+        )
+    if "boundary_weight" in training and training.get("monte_carlo") is not None:
+        raise ValueError(
+            "training.boundary_weight is for legacy objectives; the paper comparison "
+            "uses adaptive component weighting and method-specific boundary treatment."
+        )
+
+    optimizer = training.get("optimizer", {})
+    if isinstance(optimizer, str):
+        optimizer_name, optimizer_options = optimizer.lower(), {}
+    else:
+        optimizer_options = dict(require_mapping(optimizer, "training.optimizer"))
+        optimizer_name = str(optimizer_options.pop("name", "adam")).lower()
+    if optimizer_name not in {"adam", "adamw"}:
+        raise ValueError("training.optimizer.name must be 'adam' or 'adamw'")
+    reject_unknown(
+        optimizer_options, {"betas", "eps", "weight_decay", "amsgrad"}, "optimizer"
+    )
+    if "betas" in optimizer_options:
+        betas = optimizer_options["betas"]
+        if not isinstance(betas, (list, tuple)) or len(betas) != 2 or any(
+            not 0.0 <= float(beta) < 1.0 for beta in betas
+        ):
+            raise ValueError("training.optimizer.betas must contain two values in [0, 1)")
+    if "eps" in optimizer_options and float(optimizer_options["eps"]) <= 0:
+        raise ValueError("training.optimizer.eps must be positive")
+    if "weight_decay" in optimizer_options and float(optimizer_options["weight_decay"]) < 0:
+        raise ValueError("training.optimizer.weight_decay must be nonnegative")
+
+    scheduler = training.get("scheduler")
+    if scheduler is not None:
+        if isinstance(scheduler, str):
+            scheduler_name, scheduler_options = scheduler.lower(), {}
+        else:
+            scheduler_options = dict(require_mapping(scheduler, "training.scheduler"))
+            scheduler_name = str(scheduler_options.pop("name", "exponential")).lower()
+        if scheduler_name not in {"constant", "exponential", "step"}:
+            raise ValueError("training.scheduler.name must be constant, exponential, or step")
+        reject_unknown(scheduler_options, {"gamma", "step_size_epochs"}, "scheduler")
+        if scheduler_name == "constant" and scheduler_options:
+            raise ValueError("The constant scheduler accepts no additional settings")
+        if scheduler_name == "exponential" and "step_size_epochs" in scheduler_options:
+            raise ValueError("step_size_epochs is only used by the step scheduler")
+        if scheduler_name == "step":
+            if int(scheduler_options.get("step_size_epochs", 0)) < 1:
+                raise ValueError("step scheduler requires positive step_size_epochs")
+            if "gamma" not in scheduler_options:
+                raise ValueError("step scheduler requires gamma")
+        if "gamma" in scheduler_options and float(scheduler_options["gamma"]) <= 0:
+            raise ValueError("scheduler.gamma must be positive")
+
+    monte_carlo = training.get("monte_carlo")
+    if monte_carlo is not None:
+        monte_carlo = require_mapping(monte_carlo, "training.monte_carlo")
+        if not set(raw["methods"]).issubset(PAPER_METHODS):
+            raise ValueError(
+                "Monte Carlo solution-value data is supported with the five paper methods only."
+            )
+        reject_unknown(
+            monte_carlo,
+            {
+                "n_anchors", "paths_per_anchor", "dt", "max_steps", "seed",
+                "minimum_resolved_fraction", "anchor_points",
+                "progress_interval_fraction", "progress_interval_seconds",
+            },
+            "training.monte_carlo",
+        )
+        for key in ("n_anchors", "paths_per_anchor", "max_steps"):
+            if int(monte_carlo.get(key, 0)) < 1:
+                raise ValueError(f"training.monte_carlo.{key} must be positive")
+        if float(monte_carlo.get("dt", 0.0)) <= 0.0:
+            raise ValueError("training.monte_carlo.dt must be positive")
+        resolution = float(monte_carlo.get("minimum_resolved_fraction", 0.9))
+        if not 0.0 <= resolution <= 1.0:
+            raise ValueError("training.monte_carlo.minimum_resolved_fraction must lie in [0, 1]")
+        if not 0.0 < float(monte_carlo.get("progress_interval_fraction", 0.01)) <= 1.0:
+            raise ValueError("training.monte_carlo.progress_interval_fraction must lie in (0, 1]")
+        if float(monte_carlo.get("progress_interval_seconds", 10.0)) <= 0.0:
+            raise ValueError("training.monte_carlo.progress_interval_seconds must be positive")
+
+    nitsche = training.get("nitsche")
+    if nitsche is not None:
+        nitsche = require_mapping(nitsche, "training.nitsche")
+        reject_unknown(
+            nitsche,
+            {"volume_points", "test_functions", "boundary_points", "length_scale", "gamma", "h"},
+            "training.nitsche",
+        )
+        for key in ("volume_points", "test_functions", "boundary_points"):
+            if key in nitsche and int(nitsche[key]) < 1:
+                raise ValueError(f"training.nitsche.{key} must be positive")
+        for key in ("length_scale", "gamma", "h"):
+            if key in nitsche and float(nitsche[key]) <= 0.0:
+                raise ValueError(f"training.nitsche.{key} must be positive")
+    if "variational_nitsche" in raw["methods"] and monte_carlo is not None:
+        required_nitsche = {
+            "volume_points", "test_functions", "boundary_points", "length_scale", "gamma", "h"
+        }
+        missing = required_nitsche - set(nitsche or {})
+        if missing:
+            raise ValueError(
+                "training.nitsche is missing required setting(s): "
+                + ", ".join(sorted(missing))
+            )
+
+    if "reference_grid_sizes" in raw:
+        sizes = raw["reference_grid_sizes"]
+        if not isinstance(sizes, list) or not sizes or any(int(size) < 2 for size in sizes):
+            raise ValueError("reference_grid_sizes must be a nonempty list of integers >= 2")
+        if any(int(a) >= int(b) for a, b in zip(sizes, sizes[1:])):
+            raise ValueError("reference_grid_sizes must be strictly increasing")
+    if "evaluation_batch_size" in raw and int(raw["evaluation_batch_size"]) < 1:
+        raise ValueError("evaluation_batch_size must be positive")
+
+
 def run_periodic_comparison(
     config_path: Path,
     output_dir: Path,
@@ -393,6 +677,7 @@ def run_periodic_comparison(
         raise ValueError("CPU preparation cannot resume neural-network checkpoints")
 
     raw = json.loads(config_path.read_text(encoding="utf-8"))
+    _validate_comparison_config(raw)
     methods = list(raw["methods"])
     if not methods:
         raise ValueError("comparison configuration needs at least one method")
@@ -536,6 +821,7 @@ def evaluate_saved_models(
     if not config_path.is_file():
         raise FileNotFoundError(f"Missing comparison_config.json in {output_dir}")
     raw = json.loads(config_path.read_text(encoding="utf-8"))
+    _validate_comparison_config(raw)
     grid_sizes = [int(size) for size in raw["reference_grid_sizes"]]
     reference_path = output_dir / f"reference_fd_{max(grid_sizes)}.npz"
     if not reference_path.is_file():

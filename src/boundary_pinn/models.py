@@ -9,11 +9,18 @@ from torch import nn
 
 
 def _activation(name: str) -> Callable[[], nn.Module]:
-    if name == "tanh":
-        return nn.Tanh
-    if name == "relu":
-        return nn.ReLU
-    raise ValueError(f"Unknown activation {name!r}; use 'tanh' or 'relu'.")
+    activations: dict[str, Callable[[], nn.Module]] = {
+        "tanh": nn.Tanh,
+        "relu": nn.ReLU,
+        "gelu": nn.GELU,
+        "silu": nn.SiLU,
+        "softplus": nn.Softplus,
+    }
+    try:
+        return activations[name.lower()]
+    except KeyError as error:
+        choices = ", ".join(sorted(activations))
+        raise ValueError(f"Unknown activation {name!r}; choose one of: {choices}.") from error
 
 
 class MLP(nn.Module):
@@ -35,15 +42,34 @@ class MLP(nn.Module):
 
 
 class PeriodicMLP(nn.Module):
-    """An MLP composed with a sine/cosine embedding of the unit torus."""
+    """An MLP composed with one or more integer-frequency torus features.
 
-    def __init__(self, network: MLP):
+    Frequency one reproduces the original four features exactly. Multiple
+    positive integer frequencies add periodic Fourier features while preserving
+    unit-periodicity in each coordinate.
+    """
+
+    def __init__(self, network: MLP, frequencies: tuple[float, ...] = (1.0,)):
         super().__init__()
+        if not frequencies or any(
+            float(value) <= 0.0 or not float(value).is_integer() for value in frequencies
+        ):
+            raise ValueError("frequencies must be a nonempty sequence of positive integers")
         self.network = network
+        self.frequencies = tuple(float(value) for value in frequencies)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        phase = 2.0 * torch.pi * x
-        features = torch.cat((torch.sin(phase), torch.cos(phase)), dim=-1)
+        if self.frequencies == (1.0,):
+            phase = 2.0 * torch.pi * x
+            features = torch.cat((torch.sin(phase), torch.cos(phase)), dim=-1)
+        else:
+            frequencies = torch.as_tensor(self.frequencies, device=x.device, dtype=x.dtype)
+            phase = 2.0 * torch.pi * x.unsqueeze(-2) * frequencies.view(
+                *((1,) * (x.ndim - 1)), -1, 1
+            )
+            features = torch.cat((torch.sin(phase), torch.cos(phase)), dim=-1).flatten(
+                start_dim=-2
+            )
         return self.network(features)
 
 
