@@ -30,6 +30,7 @@ from ....problems.committor.paper_methods import (
     generate_committor_mc_data,
 )
 from ....problems.committor.training import (
+    PAPER_METHODS,
     PeriodicCommittorConfig,
     _build_periodic_committor_model,
     _dtype,
@@ -460,6 +461,9 @@ def _validate_comparison_config(raw: dict[str, Any]) -> None:
             raise ValueError(f"Missing required comparison setting: {required}")
     if raw["dtype"] not in {"float32", "float64"}:
         raise ValueError("dtype must be float32 or float64")
+    device = str(raw["device"])
+    if device != "cpu" and not device.startswith("cuda"):
+        raise ValueError("device must be 'cpu' or a CUDA device such as 'cuda' or 'cuda:0'")
     if not isinstance(raw["methods"], list) or not raw["methods"]:
         raise ValueError("methods must be a nonempty list")
     if len(set(raw["methods"])) != len(raw["methods"]):

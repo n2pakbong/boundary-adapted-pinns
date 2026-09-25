@@ -2,7 +2,7 @@
 
 ## Start here
 
-`gpu_pilot.json` is the version-controlled five-method preset used for the reported pilot. The Colab notebook loads this preset in its **Experiment settings** cell. You can edit the preset in the repository or use the notebook's `RUN_OVERRIDES` dictionary for a one-off variation. CPU preparation saves the fully resolved configuration as `comparison_config.json` in the Drive run folder. GPU training reads that saved copy, so changes made after preparation cannot silently alter the run.
+`gpu_pilot.json` is the version-controlled five-method preset used for the reported pilot. The Colab notebook loads this preset in its **Experiment settings** cell. You can edit the preset in the repository or use the notebook's `RUN_OVERRIDES` dictionary for a one-off variation. CPU preparation saves the fully resolved configuration as `comparison_config.json` in the Drive run folder. training reads that saved copy, so changes made after preparation cannot silently alter the run.
 
 The defaults reproduce the successful pilot. All five methods use the same periodic MLP size, initialization seed, collocation budget, Monte Carlo anchors and labels, optimizer family, and epoch budget where the method permits. This keeps the comparison focused on the boundary representation and variational formulation. These values are a useful baseline, not the result of a hyperparameter sweep.
 
@@ -13,6 +13,7 @@ Earlier exploratory run folders used a three-method objective and may contain `t
 | Setting | Pilot value | What it controls |
 |---|---:|---|
 | `methods` | all five methods | Selects which methods are trained: `simple_pinn`, `boundary_adapted`, `over_enforced`, `under_enforced`, and `variational_nitsche`. |
+| `device`, `dtype` | `cuda`, `float64` | Select `cpu` or `cuda` training, and `float32` or `float64`. Setup, preflight, and reference/data preparation use CPU; the training stage uses the configured device. Full CPU training avoids allocating a GPU runtime but can be much slower. |
 | `problem` | `a=1`, `b=0.6`, `epsilon=0.4`; centers `(0.25,0)` and `(0.75,0)`; radius `0.5` | Controls the periodic potential, diffusion strength, source/target centers, and target-set radius. |
 | `seed` | 7 | Seeds network initialization and training-point sampling. Each method starts from the same seed so the underlying MLP starts comparably. |
 | `model.architecture` | `periodic_mlp` | Supported choices: `periodic_mlp` (first harmonic) and `periodic_fourier_mlp` (multiple harmonics), each followed by a fully connected MLP. |

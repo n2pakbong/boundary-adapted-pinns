@@ -182,32 +182,34 @@ The values used for the successful five-method pilot are in [`gpu_pilot.json`](c
 
 The periodic network uses the same sine/cosine coordinate embedding and fully connected MLP across methods. The default has width 64, depth 4, `tanh`, Xavier-normal weights with gain 1, zero biases, and seed 7. This keeps the network core comparable while changing the boundary ansatz. Smooth `tanh` supports the strong-form residual's second derivatives. Width and depth set the network's capacity. These defaults reproduce the successful pilot; they have not been selected by a hyperparameter sweep.
 
+The `device` and `dtype` settings select CPU or CUDA and float32 or float64. Full CPU training avoids allocating a GPU runtime but can be substantially slower.
+
 The training preset uses Adam with learning rate 0.001 and exponential decay `gamma=0.9999` for 6,000 epochs. The 1,024 PDE collocation points are resampled each epoch. The standard PINN uses 256 fresh points on each Dirichlet boundary. The exact-boundary methods have no pointwise boundary loss. Nitsche instead uses its explicitly listed volume, test-function, and boundary-quadrature counts.
 
 The committor data term uses 32 anchor points, each labelled with 256 independent paths (8,192 paths total). Finite path counts create binomial sampling noise. The time step and path cap also affect the estimator through discretization and censoring. All five methods reuse the same anchors and labels. The preparation plot shows the anchor locations, labels, and estimated standard errors before training.
 
-In Colab, the **Experiment settings** cell loads the tracked preset and accepts overrides without changing training source. CPU preparation saves the resolved configuration in the run folder. After the runtime restarts, GPU training reads that saved configuration. The temporary `/content` copy is used only to hand the selected settings to CPU preparation; the durable copy is `comparison_config.json` in the Drive run folder. To reuse an override, copy that file into `configs/` under a descriptive name and point `PRESET_CONFIG_PATH` in the notebook settings cell at it. The configuration guide lists every field and supported value.
+In Colab, the **Experiment settings** cell loads the tracked preset and accepts overrides without changing training source. CPU preparation saves the resolved configuration in the run folder. After the runtime restarts, training reads that saved configuration. The temporary `/content` copy is used only to hand the selected settings to CPU preparation; the durable copy is `comparison_config.json` in the Drive run folder. To reuse an override, copy that file into `configs/` under a descriptive name and point `PRESET_CONFIG_PATH` in the notebook settings cell at it. The configuration guide lists every field and supported value.
 
 ## Run sequence and compute used
 
 1. **Setup and tests:** install the selected repository revision and run unit tests on CPU.
 2. **CPU preflight:** run the five-method code with fixed near-boundary Monte Carlo paths, tiny networks, one epoch, and coarse references. This checks the wiring, not scientific accuracy. It writes only to temporary Colab storage.
 3. **CPU experiment preparation:** solve both finite-difference reference grids and generate the shared Feynman–Kac labels with `--prepare-cpu-only`. This is the potentially long CPU stage. Its step progress and resolution diagnostics are printed while it runs. The reference, labels, configuration, metadata, and log are saved in the experiment's dated Drive folder so the work survives a runtime restart.
-4. **GPU training and solution evaluation:** after CPU preparation succeeds, switch Colab to a GPU runtime and use `--train-prepared` with that same folder. This loads the saved reference and labels; it does not repeat the finite-difference solves or Monte Carlo paths. Network training and inference for the solution-error tables use GPU. Only start this stage when ready to spend GPU time.
+4. **Training and solution evaluation:** after CPU preparation succeeds, use `--train-prepared` with that same folder. If `device` is `cuda`, switch Colab to a GPU runtime first; if it is `cpu`, stay on CPU. This loads the saved reference and labels; it does not repeat the finite-difference solves or Monte Carlo paths.
 5. **Inspect:** read final training components, Sobolev errors, loss curves, and solution previews in the notebook.
 6. **Evaluate saved models:** recompute solution errors from saved checkpoints on CPU; this does not retrain.
 
-CPU preparation files record the repository revision. Reuse them only with the same code revision; if the code changes, rerun CPU preparation before training. The GPU runner checks the saved revision and refuses mismatched preparation. Resuming a checkpoint also requires the same objective version; if the version is incompatible, use a new dated run folder rather than combining different training objectives.
+CPU preparation files record the repository revision. Reuse them only with the same code revision; if the code changes, rerun CPU preparation before training. The training runner checks the saved revision and refuses mismatched preparation. Resuming a checkpoint also requires the same objective version; if the version is incompatible, use a new dated run folder rather than combining different training objectives.
 
-Changing the Colab runtime clears its variables and local files. After changing to GPU, rerun Setup to install the same branch and paste the path printed by CPU preparation into the GPU cell. Setup skips rerunning unit tests in the GPU runtime; the CPU tests and preflight already passed before preparation. It reuses the saved preparation folder on Drive and never repeats the long CPU work. The supplied GPU config is a single-seed exploratory run, not a final paper result; a paper study requires multiple seeds, reference-grid and Monte Carlo convergence checks, and matched compute budgets.
+Changing the Colab runtime clears its variables and local files. If the saved configuration selects `cuda`, change Colab to GPU, rerun Setup with the same branch, and paste the path printed by CPU preparation into the training cell. If it selects `cpu`, stay on CPU and use that same training cell. Setup skips rerunning unit tests in the GPU runtime; the CPU tests and preflight already passed before preparation. Both paths reuse the saved preparation folder on Drive and never repeat the long CPU work. The supplied five-method preset uses CUDA and is a single-seed exploratory run, not a final paper result; a paper study requires multiple seeds, reference-grid and Monte Carlo convergence checks, and matched compute budgets.
 
-For a terminal run, use the same output directory for both stages:
+For a terminal run, use the same output directory for both stages. CPU preparation always runs on CPU; run the training command on CPU or GPU to match the configuration's `device` value:
 
 ```bash
 RUN_DIR=runs/periodic_committor/gpu_pilot
 periodic-committor experiments/committor/periodic_two_well/configs/gpu_pilot.json \
   --output-dir "$RUN_DIR" --prepare-cpu-only
-# Run this second command in the GPU-enabled environment:
+# If device is cuda, run this command in a GPU-enabled environment; if device is cpu, keep using CPU:
 periodic-committor experiments/committor/periodic_two_well/configs/gpu_pilot.json \
   --output-dir "$RUN_DIR" --train-prepared
 ```
@@ -224,7 +226,7 @@ periodic-committor experiments/committor/periodic_two_well/configs/gpu_pilot.jso
 | `experiments/committor/periodic_two_well/configs/gpu_pilot.json` | Explicit single-seed five-method exploratory settings. |
 | `colab/periodic_committor.ipynb` | Colab workflow, derivation, method definitions, and visible output tables. |
 
-Each dated GPU run folder contains `comparison_config.json`, `comparison_metadata.json`, the FDM reference `.npz`, shared `monte_carlo_labels.npz` and `.json`, `summary.json`, `losses.png`, diagnostic solution figures, and one folder per method. Each method folder contains its `metrics.jsonl`, `final_training_metrics.json`, `best.pt`, and resumable `last.pt`.
+Each dated experiment folder contains `comparison_config.json`, `comparison_metadata.json`, the FDM reference `.npz`, shared `monte_carlo_labels.npz` and `.json`, `summary.json`, `losses.png`, diagnostic solution figures, and one folder per method. Each method folder contains its `metrics.jsonl`, `final_training_metrics.json`, `best.pt`, and resumable `last.pt`.
 
 ## References
 

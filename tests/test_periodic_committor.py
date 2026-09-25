@@ -581,3 +581,7 @@ def test_comparison_settings_reject_silent_or_incomplete_controls() -> None:
     }
     with pytest.raises(ValueError, match="requires gamma"):
         _validate_comparison_config(missing_gamma)
+
+    unsupported_device = {**valid, "device": "mps"}
+    with pytest.raises(ValueError, match="device must be 'cpu' or a CUDA device"):
+        _validate_comparison_config(unsupported_device)
