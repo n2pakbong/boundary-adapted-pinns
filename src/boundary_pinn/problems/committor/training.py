@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import platform
 import random
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -96,9 +97,20 @@ def _initialize_mlp(model_config: dict[str, Any], *, input_dim: int = 2) -> MLP:
         depth=int(model_config["depth"]),
         activation=str(model_config.get("activation", "tanh")),
     )
+    initialization = str(model_config.get("initialization", "xavier_normal")).lower()
+    gain = float(model_config.get("gain", 1.0))
+    initializers = {
+        "xavier_normal": torch.nn.init.xavier_normal_,
+        "xavier_uniform": torch.nn.init.xavier_uniform_,
+    }
+    if initialization not in initializers:
+        raise ValueError(
+            f"Unknown initialization {initialization!r}; "
+            f"choose one of: {', '.join(initializers)}."
+        )
     for module in base.modules():
         if isinstance(module, torch.nn.Linear):
-            torch.nn.init.xavier_normal_(module.weight, gain=float(model_config.get("gain", 1.0)))
+            initializers[initialization](module.weight, gain=gain)
             torch.nn.init.zeros_(module.bias)
     return base
 
@@ -106,7 +118,20 @@ def _initialize_mlp(model_config: dict[str, Any], *, input_dim: int = 2) -> MLP:
 def _build_periodic_committor_model(
     config: PeriodicCommittorConfig, problem: PeriodicTwoWellCommittor
 ) -> torch.nn.Module:
-    base = PeriodicMLP(_initialize_mlp(config.model, input_dim=4))
+    architecture = str(config.model.get("architecture", "periodic_mlp")).lower()
+    if architecture == "periodic_mlp":
+        frequencies = (1.0,)
+    elif architecture == "periodic_fourier_mlp":
+        frequencies = tuple(float(value) for value in config.model.get("frequencies", (1, 2, 4)))
+    else:
+        raise ValueError(
+            f"Unknown committor architecture {architecture!r}; choose "
+            "'periodic_mlp' or 'periodic_fourier_mlp'."
+        )
+    base = PeriodicMLP(
+        _initialize_mlp(config.model, input_dim=4 * len(frequencies)),
+        frequencies=frequencies,
+    )
     if config.method in ("simple_pinn", "penalty"):
         return base
     if config.method == "boundary_adapted":
@@ -160,6 +185,72 @@ def _load_or_generate_mc_data(
     data = generate_committor_mc_data(problem, **settings)
     _save_mc_data(data, path)
     return data
+
+
+def _build_optimizer(
+    parameters: list[torch.nn.Parameter], training: dict[str, Any]
+) -> torch.optim.Optimizer:
+    """Build an explicitly configured Adam-family optimizer."""
+    specification = training.get("optimizer", {})
+    if isinstance(specification, str):
+        name, options = specification.lower(), {}
+    else:
+        options = dict(specification)
+        name = str(options.pop("name", "adam")).lower()
+    allowed = {"betas", "eps", "weight_decay", "amsgrad"}
+    unknown = set(options) - allowed
+    if unknown:
+        raise ValueError(f"Unsupported optimizer options: {sorted(unknown)}")
+    if "betas" in options:
+        options["betas"] = tuple(float(value) for value in options["betas"])
+    options["eps"] = float(options.get("eps", 1.0e-8))
+    options["weight_decay"] = float(options.get("weight_decay", 0.0))
+    options["amsgrad"] = bool(options.get("amsgrad", False))
+    learning_rate = float(training["learning_rate"])
+    if name == "adam":
+        return torch.optim.Adam(parameters, lr=learning_rate, **options)
+    if name == "adamw":
+        return torch.optim.AdamW(parameters, lr=learning_rate, **options)
+    raise ValueError("optimizer.name must be 'adam' or 'adamw'")
+
+
+def _build_scheduler(
+    optimizer: torch.optim.Optimizer, training: dict[str, Any]
+) -> torch.optim.lr_scheduler.LRScheduler:
+    """Build the configured per-epoch learning-rate schedule."""
+    specification = training.get("scheduler")
+    if specification is None:
+        name = "exponential"
+        options: dict[str, Any] = {"gamma": float(training.get("lr_gamma", 1.0))}
+    elif isinstance(specification, str):
+        name, options = specification.lower(), {}
+    else:
+        options = dict(specification)
+        name = str(options.pop("name", "exponential")).lower()
+    if name == "constant":
+        return torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda _epoch: 1.0)
+    if name == "exponential":
+        return torch.optim.lr_scheduler.ExponentialLR(
+            optimizer, gamma=float(options.get("gamma", training.get("lr_gamma", 1.0)))
+        )
+    if name == "step":
+        return torch.optim.lr_scheduler.StepLR(
+            optimizer,
+            step_size=int(options["step_size_epochs"]),
+            gamma=float(options["gamma"]),
+        )
+    raise ValueError("scheduler.name must be 'constant', 'exponential', or 'step'")
+
+
+def _format_duration(seconds: float) -> str:
+    total = max(0, int(seconds))
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours:d}h {minutes:02d}m"
+    if minutes:
+        return f"{minutes:d}m {secs:02d}s"
+    return f"{secs:d}s"
 
 
 def run_periodic_committor(
@@ -237,17 +328,22 @@ def run_periodic_committor(
     }
     loss_scales = None
     if uses_paper_objective:
+        initial_log_scale = float(
+            config.training.get("adaptive_loss_log_scale_init", 0.0)
+        )
+        if not np.isfinite(initial_log_scale):
+            raise ValueError("training.adaptive_loss_log_scale_init must be finite")
         loss_scales = nn.ParameterDict({
-            name: nn.Parameter(torch.zeros((), device=requested_device, dtype=dtype))
+            name: nn.Parameter(torch.full(
+                (), initial_log_scale, device=requested_device, dtype=dtype
+            ))
             for name in scale_names[config.method]
         })
     parameters = list(model.parameters())
     if loss_scales is not None:
         parameters.extend(loss_scales.parameters())
-    optimizer = torch.optim.Adam(parameters, lr=float(config.training["learning_rate"]))
-    scheduler = torch.optim.lr_scheduler.ExponentialLR(
-        optimizer, gamma=float(config.training.get("lr_gamma", 1.0))
-    )
+    optimizer = _build_optimizer(parameters, config.training)
+    scheduler = _build_scheduler(optimizer, config.training)
 
     start_epoch, best_loss, best_epoch = 1, float("inf"), 0
     best_model_state: dict[str, torch.Tensor] | None = None
@@ -273,7 +369,15 @@ def run_periodic_committor(
     boundary_points = int(config.training.get("boundary_points", collocation_points // 4))
     boundary_weight = float(config.training.get("boundary_weight", 100.0))
     checkpoint_every = int(config.training.get("checkpoint_every", 100))
-    log_every = int(config.training.get("log_every", 25))
+    log_interval_seconds = float(config.training.get("log_interval_seconds", 30.0))
+    if log_interval_seconds <= 0.0:
+        raise ValueError("training.log_interval_seconds must be positive")
+    # Read old configs for already-created runs; new presets use wall-clock reporting.
+    legacy_log_every = (
+        int(config.training["log_every"])
+        if "log_every" in config.training and "log_interval_seconds" not in config.training
+        else None
+    )
     metrics_path = run_dir / "metrics.jsonl"
     metrics_mode = "a" if resume else "w"
     mc_x = mc_y = None
@@ -286,6 +390,8 @@ def run_periodic_committor(
         else 0.0
     )
     final_record: dict[str, Any] | None = None
+    training_started = time.monotonic()
+    next_report_at = training_started
     with metrics_path.open(metrics_mode, encoding="utf-8") as metrics_file:
         for epoch in range(start_epoch, epochs + 1):
             model.train()
@@ -384,14 +490,38 @@ def run_periodic_committor(
                     name: float(torch.exp(-2.0 * value.detach()).cpu())
                     for name, value in loss_scales.items()
                 }
-            if epoch == 1 or epoch % log_every == 0 or epoch == epochs:
-                metrics_file.write(json.dumps(record, sort_keys=True) + "\n")
+            now = time.monotonic()
+            elapsed = now - training_started
+            completed_epochs = epoch - start_epoch + 1
+            rate = completed_epochs / max(elapsed, 1.0e-12)
+            remaining_seconds = max(0, epochs - epoch) / max(rate, 1.0e-12)
+            record["session_elapsed_seconds"] = elapsed
+            record["session_epochs_per_second"] = rate
+            record["estimated_remaining_seconds"] = remaining_seconds
+
+            if legacy_log_every is not None:
+                report_due = (
+                    epoch == start_epoch or epoch % legacy_log_every == 0 or epoch == epochs
+                )
+            else:
+                report_due = epoch == start_epoch or epoch == epochs or now >= next_report_at
+
+            # Keep every epoch for a full-resolution loss history. The time
+            # interval controls console output only, not the saved metrics.
+            metrics_file.write(json.dumps(record, sort_keys=True) + "\n")
+            if report_due:
                 metrics_file.flush()
                 fields = " | ".join(
                     f"{name}={record[name]:.4g}" for name in record
                     if name == "objective" or name in losses or name in diagnostics
                 )
-                print(f"{config.method} | epoch {epoch}/{epochs} | {fields}", flush=True)
+                print(
+                    f"{config.method} | epoch {epoch:,}/{epochs:,} | "
+                    f"elapsed {_format_duration(elapsed)} | "
+                    f"ETA {_format_duration(remaining_seconds)} | {fields}",
+                    flush=True,
+                )
+                next_report_at = now + log_interval_seconds
 
             if loss_value < best_loss:
                 best_loss = loss_value
@@ -399,6 +529,8 @@ def run_periodic_committor(
                 best_model_state = _cpu_model_state(model)
             checkpoint_due = epoch == 1 or epoch % checkpoint_every == 0 or epoch == epochs
             if checkpoint_due:
+                # Persist progress through each restartable checkpoint.
+                metrics_file.flush()
                 atomic_torch_save(
                     _checkpoint_payload(
                         epoch=epoch,
