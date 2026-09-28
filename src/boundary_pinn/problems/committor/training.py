@@ -50,31 +50,49 @@ def _callable_name(function: Callable[..., Any] | None, default: str) -> str:
     return f"{function.__module__}.{function.__qualname__}"
 
 def _callable_fingerprint(callback: Callable[..., Any] | None) -> str | None:
-    """Hash callback source, with a stable code-object fallback for interactive cells."""
+    """Hash callback code and referenced scalar globals for reproducible resume checks."""
     if callback is None:
         return None
+    if isinstance(callback, type):
+        members = list(vars(callback).items())
+    elif hasattr(callback, "__code__"):
+        members = [("", callback)]
+    else:
+        members = [("__call__", getattr(type(callback), "__call__", callback))]
+
+    code_objects = []
+    dependencies: dict[str, str] = {}
+    for name, member in members:
+        function = getattr(member, "__func__", member)
+        code = getattr(function, "__code__", None)
+        if code is None:
+            continue
+
+        def describe(code_object: types.CodeType) -> dict[str, Any]:
+            return {
+                "bytecode": code_object.co_code.hex(),
+                "names": code_object.co_names,
+                "variables": code_object.co_varnames,
+                "constants": [
+                    describe(value) if isinstance(value, types.CodeType) else repr(value)
+                    for value in code_object.co_consts
+                ],
+            }
+
+        code_objects.append((name, describe(code)))
+        namespace = getattr(function, "__globals__", {})
+        for global_name in code.co_names:
+            value = namespace.get(global_name)
+            if isinstance(value, (str, int, float, bool, tuple, list, dict, type(None))):
+                dependencies[f"{name}:{global_name}"] = repr(value)
+        for cell_index, cell in enumerate(getattr(function, "__closure__", None) or ()):
+            value = cell.cell_contents
+            if isinstance(value, (str, int, float, bool, tuple, list, dict, type(None))):
+                dependencies[f"{name}:closure:{cell_index}"] = repr(value)
+
     try:
         source = inspect.getsource(callback).encode("utf-8")
     except (OSError, TypeError):
-        code_objects = []
-        members = vars(callback).items() if isinstance(callback, type) else (("__call__", callback),)
-        for name, member in members:
-            code = getattr(member, "__code__", None)
-            if code is None:
-                continue
-
-            def describe(code_object: types.CodeType) -> dict[str, Any]:
-                return {
-                    "bytecode": code_object.co_code.hex(),
-                    "names": code_object.co_names,
-                    "variables": code_object.co_varnames,
-                    "constants": [
-                        describe(value) if isinstance(value, types.CodeType) else repr(value)
-                        for value in code_object.co_consts
-                    ],
-                }
-
-            code_objects.append((name, describe(code)))
         if not code_objects:
             return None
         source = json.dumps(code_objects, sort_keys=True).encode("utf-8")
@@ -82,7 +100,9 @@ def _callable_fingerprint(callback: Callable[..., Any] | None) -> str | None:
         getattr(callback, "__defaults__", None),
         getattr(callback, "__kwdefaults__", None),
     )).encode("utf-8")
-    return hashlib.sha256(source + defaults).hexdigest()
+    dependency_data = json.dumps(dependencies, sort_keys=True).encode("utf-8")
+    return hashlib.sha256(source + defaults + dependency_data).hexdigest()
+
 
 @dataclass(frozen=True)
 class PeriodicCommittorConfig:
