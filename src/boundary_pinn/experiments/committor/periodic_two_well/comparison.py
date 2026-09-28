@@ -832,7 +832,8 @@ def run_periodic_comparison(
             if _preparation_inputs(previous_config) != _preparation_inputs(raw):
                 raise ValueError(
                     "The selected problem, reference grids, or Monte Carlo settings differ "
-                    "from the saved CPU preparation. Prepare a new folder for those changes."
+                    "from the saved CPU preparation. Restore the saved preparation settings, "
+                    "or create a new folder for the changed preparation."
                 )
     else:
         write_json(config_record, raw)
