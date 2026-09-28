@@ -51,6 +51,14 @@ def test_squared_relu_is_available_as_an_explicit_activation() -> None:
     expected = torch.tensor([0.0, 0.0, 0.0, 0.25, 4.0])
     assert torch.equal(SquaredReLU()(values), expected)
 
+    from boundary_pinn.problems.committor.training import _initialize_mlp
+
+    network = _initialize_mlp(
+        {"width": 4, "depth": 1, "activation": "SquaredReLU"},
+        input_dim=2,
+    )
+    assert any(isinstance(module, SquaredReLU) for module in network.modules())
+
 
 def test_functional_pytorch_activation_import_path_accepts_kwargs() -> None:
     from boundary_pinn.models import _activation
