@@ -228,6 +228,11 @@ def _device_request_matches(
     """Treat an unindexed device request such as cuda as the current device."""
     actual_device = torch.device(actual)
     requested_device = torch.device(requested)
+    if requested_device.type == "cuda" and requested_device.index is None:
+        return (
+            actual_device.type == "cuda"
+            and actual_device.index == torch.cuda.current_device()
+        )
     return actual_device.type == requested_device.type and (
         requested_device.index is None or actual_device.index == requested_device.index
     )
