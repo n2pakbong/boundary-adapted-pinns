@@ -5,6 +5,7 @@ import torch
 
 from boundary_pinn.models import LiftedBoundaryFactorPINN, MLP, PeriodicMLP, SquaredReLU
 from boundary_pinn.problems.committor import PeriodicTwoWellCommittor
+from boundary_pinn.problems.committor.periodic_two_well import sample_interior_points
 from boundary_pinn.problems.committor.reference import (
     PeriodicCommittorReference,
     periodic_reference_errors,
@@ -86,6 +87,31 @@ def test_custom_indicator_module_is_available_by_import_path(monkeypatch) -> Non
     values = torch.tensor([-1.0, 0.0, 1.0])
     expected = torch.tensor([0.0, 0.0, 1.0])
     assert torch.equal(activation(values), expected)
+
+
+def test_user_interior_sampler_must_return_points_inside_the_domain() -> None:
+    problem = _problem()
+    calls = []
+
+    def sampler(problem, n, *, device, dtype, generator=None):
+        calls.append(n)
+        return problem.sample_interior(
+            n, device=device, dtype=dtype, generator=generator
+        )
+
+    points = sample_interior_points(
+        problem, 8, device="cpu", dtype=torch.float64, sampler=sampler
+    )
+    assert points.shape == (8, 2)
+    assert calls == [8]
+
+    def invalid_sampler(problem, n, *, device, dtype, generator=None):
+        return torch.tensor([0.25, 0.0], device=device, dtype=dtype).expand(n, 2).clone()
+
+    with pytest.raises(ValueError, match="outside the open domain"):
+        sample_interior_points(
+            problem, 2, device="cpu", dtype=torch.float64, sampler=invalid_sampler
+        )
 
 
 @pytest.mark.parametrize(
@@ -258,6 +284,99 @@ def test_periodic_comparison_cpu_smoke(tmp_path, capsys) -> None:
     metadata = json.loads((output_dir / "comparison_metadata.json").read_text(encoding="utf-8"))
     assert "git_revision" in metadata
     assert set(summary["methods"]) == set(config["methods"])
+
+
+def test_comparison_accepts_plain_pytorch_model_sampler_optimizer_and_scheduler(tmp_path) -> None:
+    import json
+
+    from boundary_pinn.experiments.committor.periodic_two_well.comparison import (
+        run_periodic_comparison,
+    )
+
+    class UserPeriodicNet(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.layers = torch.nn.Sequential(
+                torch.nn.Linear(4, 8), torch.nn.Tanh(), torch.nn.Linear(8, 1)
+            )
+
+        def forward(self, x):
+            phase = 2.0 * torch.pi * x
+            features = torch.cat((torch.sin(phase), torch.cos(phase)), dim=-1)
+            return self.layers(features)
+
+    sampler_calls = []
+    optimizer_calls = []
+    scheduler_calls = []
+
+    def make_model():
+        model = UserPeriodicNet()
+        for layer in model.modules():
+            if isinstance(layer, torch.nn.Linear):
+                torch.nn.init.normal_(layer.weight, mean=0.0, std=0.1)
+                torch.nn.init.zeros_(layer.bias)
+        return model
+
+    def sample_points(problem, n, *, device, dtype, generator=None):
+        sampler_calls.append(n)
+        return problem.sample_interior(
+            n, device=device, dtype=dtype, generator=generator
+        )
+
+    def make_optimizer(parameters):
+        optimizer_calls.append(True)
+        return torch.optim.Adam(parameters, lr=1.0e-3)
+
+    def make_scheduler(optimizer):
+        scheduler_calls.append(True)
+        return torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.9)
+
+    config = {
+        "seed": 7,
+        "device": "cpu",
+        "dtype": "float64",
+        "methods": ["simple_pinn"],
+        "problem": {
+            "a": 1.0,
+            "b": 0.6,
+            "epsilon": 0.4,
+            "source_center": [0.25, 0.0],
+            "target_center": [0.75, 0.0],
+            "set_radius": 0.5,
+        },
+        "training": {
+            "epochs": 1,
+            "collocation_points": 8,
+            "boundary_points": 4,
+            "boundary_weight": 10.0,
+            "learning_rate": 1.0e-3,
+            "lr_gamma": 1.0,
+            "checkpoint_every": 1,
+            "log_every": 1,
+        },
+        "reference_grid_sizes": [16, 32],
+        "evaluation_batch_size": 256,
+    }
+    config_path = tmp_path / "user_model.json"
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    output_dir = tmp_path / "user_model_run"
+
+    run_periodic_comparison(
+        config_path,
+        output_dir,
+        model_factory=make_model,
+        interior_sampler=sample_points,
+        optimizer_factory=make_optimizer,
+        scheduler_factory=make_scheduler,
+    )
+
+    assert sampler_calls
+    assert optimizer_calls == [True]
+    assert scheduler_calls == [True]
+    assert (output_dir / "simple_pinn" / "best.pt").is_file()
+    metadata = json.loads((output_dir / "simple_pinn" / "metadata.json").read_text())
+    assert metadata["runtime_hooks"]["model"].endswith("make_model")
+    assert metadata["runtime_hooks"]["interior_sampler"].endswith("sample_points")
     for method in ("boundary_adapted", "naive_product"):
         assert summary["methods"][method]["source_boundary_rmse"] < 1e-8
         assert summary["methods"][method]["target_boundary_rmse"] < 1e-8

@@ -8,9 +8,13 @@ the same expressions can be differentiated directly by PyTorch.
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass
 
 import torch
+
+
+InteriorSampler = Callable[..., torch.Tensor]
 
 
 @dataclass(frozen=True)
@@ -216,3 +220,37 @@ class PeriodicTwoWellCommittor:
 
         x = x.detach().clone().requires_grad_(True)
         return self.generator(model(x).reshape(-1), x)
+
+
+def sample_interior_points(
+    problem: PeriodicTwoWellCommittor,
+    n: int,
+    *,
+    device: torch.device | str,
+    dtype: torch.dtype,
+    generator: torch.Generator | None = None,
+    sampler: InteriorSampler | None = None,
+) -> torch.Tensor:
+    """Draw points in the punctured torus, optionally using a user sampler.
+
+    A custom sampler receives ``(problem, n, device=..., dtype=...,
+    generator=...)`` and must return an ``[n, 2]`` tensor in the open domain
+    ``D``.  Keeping the distribution in a normal Python function makes it
+    straightforward for notebook users to inspect and replace.
+    """
+    if sampler is None:
+        return problem.sample_interior(
+            n, device=device, dtype=dtype, generator=generator
+        )
+    points = sampler(
+        problem, n, device=device, dtype=dtype, generator=generator
+    )
+    if not isinstance(points, torch.Tensor):
+        raise TypeError("an interior sampler must return a torch.Tensor")
+    if points.shape != (n, 2):
+        raise ValueError(f"an interior sampler must return shape ({n}, 2)")
+    if points.device != torch.device(device) or points.dtype != dtype:
+        raise ValueError("an interior sampler must honor the requested device and dtype")
+    if not bool(torch.all(problem.domain_mask(points))):
+        raise ValueError("an interior sampler returned points outside the open domain D")
+    return points
