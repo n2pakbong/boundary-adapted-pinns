@@ -880,6 +880,12 @@ def run_periodic_comparison(
                     f"Prepared folder is missing its comparison_config.json: {output_dir}"
                 )
             write_json(preparation_config_path, previous_config)
+        preparation_record_path = output_dir / "cpu_preparation.json"
+        preparation_record = json.loads(
+            preparation_record_path.read_text(encoding="utf-8")
+        )
+        preparation_record["config_file"] = "preparation_config.json"
+        write_json(preparation_record_path, preparation_record)
         write_json(config_record, raw)
 
     problem = PeriodicTwoWellCommittor(**raw["problem"])
