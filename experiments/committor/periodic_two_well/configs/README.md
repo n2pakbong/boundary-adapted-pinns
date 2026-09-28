@@ -2,7 +2,7 @@
 
 ## Start here
 
-`gpu_pilot.json` is the version-controlled five-method preset used for the reported pilot. The Colab notebook loads this preset in its **Experiment settings** cell. You can edit the preset in the repository or use the notebook's `RUN_OVERRIDES` dictionary for a one-off variation. CPU preparation saves the fully resolved configuration as `comparison_config.json` in the Drive run folder. training reads that saved copy, so changes made after preparation cannot silently alter the run.
+`gpu_pilot.json` is the version-controlled five-method preset used for the reported pilot. In Colab, edit each choice beside its explanation: problem and method controls appear near the opening workflow, network controls beside the trial-function explanation, Monte Carlo controls beside the label-generation explanation, and training and Nitsche controls beside their method descriptions. The final review cell assembles the choices and shows a plain-language summary; Colab users do not need this field table to make changes. The table below documents the saved configuration for command-line runs and exact reproducibility. CPU preparation saves the selected configuration as `comparison_config.json` in the Drive run folder; training later reads that saved copy, so choices cannot silently change after preparation.
 
 The defaults reproduce the successful pilot. All five methods use the same periodic MLP size, initialization seed, collocation budget, Monte Carlo anchors and labels, optimizer family, and epoch budget where the method permits. This keeps the comparison focused on the boundary representation and variational formulation. These values are a useful baseline, not the result of a hyperparameter sweep.
 

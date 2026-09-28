@@ -18,6 +18,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 from ....checkpointing import write_json
+from ....models import _activation
 from ....problems.committor import PeriodicTwoWellCommittor
 from ....problems.committor.reference import (
     PeriodicCommittorReference,
@@ -483,7 +484,7 @@ def _validate_comparison_config(raw: dict[str, Any]) -> None:
         model,
         {
             "architecture", "frequencies", "width", "depth", "activation",
-            "initialization", "gain",
+            "activation_kwargs", "initialization", "gain",
         },
         "model",
     )
@@ -494,10 +495,15 @@ def _validate_comparison_config(raw: dict[str, Any]) -> None:
         value = float(model.get(key, 0))
         if value < 1 or not value.is_integer():
             raise ValueError(f"model.{key} must be a positive integer")
-    if str(model.get("activation", "tanh")).lower() not in {
-        "tanh", "relu", "gelu", "silu", "softplus",
-    }:
-        raise ValueError("model.activation must be tanh, relu, gelu, silu, or softplus")
+    activation_name = str(model.get("activation", "tanh"))
+    try:
+        activation = _activation(activation_name, model.get("activation_kwargs"))
+        with torch.no_grad():
+            activation.eval()(torch.zeros((2, int(model.get("width", 1)))))
+    except Exception as error:
+        raise ValueError(
+            f"Could not construct or apply model.activation {activation_name!r}: {error}"
+        ) from error
     if str(model.get("initialization", "xavier_normal")).lower() not in {
         "xavier_normal", "xavier_uniform",
     }:

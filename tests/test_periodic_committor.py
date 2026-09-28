@@ -690,3 +690,113 @@ def test_comparison_settings_reject_silent_or_incomplete_controls() -> None:
     unsupported_device = {**valid, "device": "mps"}
     with pytest.raises(ValueError, match="device must be 'cpu' or a CUDA device"):
         _validate_comparison_config(unsupported_device)
+
+
+@pytest.mark.parametrize(
+    ("activation", "activation_kwargs"),
+    [
+        ("Tanh", {}),
+        ("ReLU", {}),
+        ("SquaredReLU", {}),
+        ("PReLU", {"num_parameters": 1, "init": 0.25}),
+        ("CELU", {"alpha": 1.0}),
+        ("torch.nn.functional.gelu", {"approximate": "tanh"}),
+    ],
+)
+def test_comparison_config_accepts_pytorch_activations_and_arguments(
+    activation: str, activation_kwargs: dict[str, object]
+) -> None:
+    from boundary_pinn.experiments.committor.periodic_two_well.comparison import (
+        _validate_comparison_config,
+    )
+
+    config = {
+        "seed": 7,
+        "device": "cpu",
+        "dtype": "float64",
+        "methods": ["boundary_adapted"],
+        "problem": {
+            "a": 1.0,
+            "b": 0.6,
+            "epsilon": 0.4,
+            "source_center": [0.25, 0.0],
+            "target_center": [0.75, 0.0],
+            "set_radius": 0.5,
+        },
+        "model": {
+            "width": 8,
+            "depth": 2,
+            "activation": activation,
+            "activation_kwargs": activation_kwargs,
+        },
+        "training": {
+            "epochs": 2,
+            "collocation_points": 8,
+            "learning_rate": 1e-3,
+            "scheduler": {"name": "constant"},
+        },
+        "reference_grid_sizes": [32, 64],
+    }
+
+    _validate_comparison_config(config)
+
+
+def test_comparison_config_accepts_importable_custom_module_and_function(monkeypatch) -> None:
+    import sys
+    import types
+
+    from boundary_pinn.experiments.committor.periodic_two_well.comparison import (
+        _validate_comparison_config,
+    )
+
+    module = types.ModuleType("test_custom_activation_config")
+
+    class CustomSmoothActivation(torch.nn.Module):
+        def forward(self, values):
+            return torch.tanh(values) + values.square() * 0.01
+
+    module.CustomSmoothActivation = CustomSmoothActivation
+
+    def custom_activation_function(values, beta=1.0):
+        return torch.tanh(beta * values)
+
+    module.custom_activation_function = custom_activation_function
+    monkeypatch.setitem(sys.modules, module.__name__, module)
+    config = {
+        "seed": 7,
+        "device": "cpu",
+        "dtype": "float64",
+        "methods": ["boundary_adapted"],
+        "problem": {
+            "a": 1.0,
+            "b": 0.6,
+            "epsilon": 0.4,
+            "source_center": [0.25, 0.0],
+            "target_center": [0.75, 0.0],
+            "set_radius": 0.5,
+        },
+        "model": {
+            "width": 8,
+            "depth": 2,
+            "activation": "test_custom_activation_config.CustomSmoothActivation",
+            "activation_kwargs": {},
+        },
+        "training": {
+            "epochs": 2,
+            "collocation_points": 8,
+            "learning_rate": 1e-3,
+            "scheduler": {"name": "constant"},
+        },
+        "reference_grid_sizes": [32, 64],
+    }
+
+    _validate_comparison_config(config)
+    function_config = {
+        **config,
+        "model": {
+            **config["model"],
+            "activation": "test_custom_activation_config.custom_activation_function",
+            "activation_kwargs": {"beta": 0.75},
+        },
+    }
+    _validate_comparison_config(function_config)
