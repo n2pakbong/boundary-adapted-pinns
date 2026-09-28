@@ -428,6 +428,22 @@ def test_user_selectable_activation_and_initialization_are_finite(activation, in
     assert torch.isfinite(values).all()
 
 
+def test_builtin_mlp_uses_pytorch_linear_initialization_by_default() -> None:
+    from boundary_pinn.problems.committor.training import _initialize_mlp
+
+    torch.manual_seed(17)
+    expected = MLP(input_dim=4, width=8, depth=2)
+    torch.manual_seed(17)
+    actual = _initialize_mlp(
+        {"width": 8, "depth": 2, "activation": "tanh"},
+        input_dim=4,
+    )
+    for expected_parameter, actual_parameter in zip(
+        expected.parameters(), actual.parameters(), strict=True
+    ):
+        assert torch.equal(expected_parameter, actual_parameter)
+
+
 def test_periodic_fourier_mlp_is_periodic_for_multiple_integer_frequencies() -> None:
     network = PeriodicMLP(
         MLP(input_dim=12, width=8, depth=2),
