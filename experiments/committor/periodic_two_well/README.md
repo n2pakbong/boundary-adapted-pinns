@@ -201,7 +201,7 @@ The training preset uses Adam with learning rate 0.001 and exponential decay `ga
 
 The committor data term uses 32 anchor points, each labelled with 256 independent paths (8,192 paths total). Finite path counts create binomial sampling noise. The time step and path cap also affect the estimator through discretization and censoring. All five methods reuse the same anchors and labels. The preparation plot shows the anchor locations, labels, and estimated standard errors before training.
 
-In Colab, the **Experiment settings** cell loads the tracked preset and accepts overrides without changing training source. CPU preparation saves the resolved configuration in the run folder. After the runtime restarts, training reads that saved configuration. The temporary `/content` copy is used only to hand the selected settings to CPU preparation; the durable copy is `comparison_config.json` in the Drive run folder. To reuse an override, copy that file into `configs/` under a descriptive name and point `PRESET_CONFIG_PATH` in the notebook settings cell at it. The configuration guide lists every field and supported value.
+In Colab, the **Set up a run one choice at a time** section presents separate labelled controls instead of requiring edits to a nested override dictionary. The controls start from the successful five-method pilot values and let you change the displayed choices directly. CPU preparation saves the resolved configuration in the dated Drive run folder; after a runtime restart, training reads that saved configuration. To repeat a run exactly from a terminal, pass its `comparison_config.json` to the documented runner. The configuration guide lists the full configuration fields.
 
 ## Run sequence and compute used
 
