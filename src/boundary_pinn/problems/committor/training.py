@@ -114,7 +114,11 @@ def _initialize_mlp(model_config: dict[str, Any], *, input_dim: int = 2) -> MLP:
         activation=str(model_config.get("activation", "tanh")),
         activation_kwargs=model_config.get("activation_kwargs"),
     )
-    initialization = str(model_config.get("initialization", "xavier_normal")).lower()
+    initialization = str(model_config.get("initialization", "pytorch_default")).lower()
+    if initialization == "pytorch_default":
+        # Keep the initialization already applied by each nn.Linear constructor.
+        return base
+
     gain = float(model_config.get("gain", 1.0))
     initializers = {
         "xavier_normal": torch.nn.init.xavier_normal_,
@@ -122,8 +126,8 @@ def _initialize_mlp(model_config: dict[str, Any], *, input_dim: int = 2) -> MLP:
     }
     if initialization not in initializers:
         raise ValueError(
-            f"Unknown initialization {initialization!r}; "
-            f"choose one of: {', '.join(initializers)}."
+            f"Unknown initialization {initialization!r}; choose "
+            "'pytorch_default', 'xavier_normal', or 'xavier_uniform'."
         )
     for module in base.modules():
         if isinstance(module, torch.nn.Linear):
