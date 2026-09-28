@@ -14,7 +14,7 @@ dX_t=-\nabla V(X_t)\,dt+\sqrt{2\varepsilon}\,dW_t\pmod 1,
 V(x_1,x_2)=a[1-\cos(4\pi(x_1-1/4))]+b[1-\cos(2\pi x_2)].
 $$
 
-Let $A$ and $B$ be the two periodic disks centred at $(1/4,0)$ and $(3/4,0)$. The forward committor is
+By default, $A$ and $B$ are periodic disks centred at $(1/4,0)$ and $(3/4,0)$. The forward committor is
 
 $$
 q(x)=\mathbb P_x(\tau_B<\tau_A),
@@ -23,6 +23,8 @@ q(x)=\mathbb P_x(\tau_B<\tau_A),
 $$
 
 with $q=0$ on $\partial A$ and $q=1$ on $\partial B$. The example therefore solves a probability problem, not a mean escape time problem. The default values are $a=1$, $b=0.6$, $\varepsilon=0.4$, and chordal radius $r=0.5$.
+
+The supported geometry is this flat unit torus with two equal-radius periodic disks. The configuration can change $a$, $b$, $\varepsilon$, the two disk centers, and their common chordal radius. The torus, disk geometry, and cosine formula for $V$ are fixed in this example; its potential minima remain near $(1/4,0)$ and $(3/4,0)$ even when set centers are changed. The problem constructor checks that the two closed disks are disjoint. Supporting another domain, boundary-set geometry, or potential requires changing the problem implementation and its samplers.
 
 ## Boundary geometry and network representations
 
@@ -34,13 +36,26 @@ $$
 d_j(x)=\frac{\omega_j(x)}{\sqrt{\omega_j(x)^2+|\nabla\omega_j(x)|^2}}.
 $$
 
-The zero level set of $\omega_j$ is the boundary, $d_j=0$ there, and $|\nabla d_j|=1$ there. In $D$, both $d_A$ and $d_B$ are positive. The code uses the lift and the first-order-normalized two-boundary factor
+On the boundary $\omega_j=0$, differentiating the quotient gives
+$$
+\nabla d_j=\frac{\nabla\omega_j}{|\nabla\omega_j|},
+\qquad |\nabla d_j|=1,
+$$
+provided $\nabla\omega_j\ne0$, as it is for these level sets. Thus $d_j$ agrees with signed distance to first order at its own boundary, even though it is not the exact distance away from that boundary. In the exterior domain $D$, both $d_A$ and $d_B$ are positive.
+
+
+The code uses the lift and the first-order-normalized two-boundary factor
 
 $$
 g(x)=\frac{d_A(x)}{d_A(x)+d_B(x)},
 \qquad
 \rho(x)=\frac{d_A(x)d_B(x)}{\sqrt{d_A(x)^2+d_B(x)^2}}.
 $$
+
+For the two-boundary factor, write $F(a,b)=ab/\sqrt{a^2+b^2}$, so $\rho=F(d_A,d_B)$. On $\partial A$, disjointness gives $d_B>0$, and $\partial_aF(0,d_B)=1$, $\partial_bF(0,d_B)=0$. Hence $\nabla\rho=\nabla d_A$ and $|\nabla\rho|=1$ there. The same calculation on $\partial B$ gives $\nabla\rho=\nabla d_B$ and $|\nabla\rho|=1$. The outward normal of the exterior domain points into the removed sets, so $n_D=-\nabla d_A$ on $\partial A$ and $n_D=-\nabla d_B$ on $\partial B$; consequently $\partial_{n_D}\rho=-1$ on either boundary.
+
+A plain product $d_A d_B$ vanishes on both boundaries but has $\nabla(d_A d_B)=d_B\nabla d_A$ on $\partial A$ and $d_A\nabla d_B$ on $\partial B$. Its normal derivative is therefore scaled by the distance to the other set, rather than normalized to unit magnitude. The factor $\rho$ removes that cross-boundary scale. In $q_\theta=g+\rho^\alpha N_\theta$, this gives the network correction a controlled first-order scale at each boundary; changing $\alpha$ then changes its order of vanishing.
+
 
 Thus $g=0$ on $\partial A$, $g=1$ on $\partial B$, and $\rho=0$ on both. The exact-boundary family is
 
@@ -180,7 +195,7 @@ The notebook displays the Sobolev error table and the final training-loss table.
 
 The values used for the successful five-method pilot are in [`gpu_pilot.json`](configs/gpu_pilot.json). A field-by-field guide, including the Monte Carlo sample count and noise, optimizer options, initialization, reporting interval, and reference grids, is in [the configuration guide](configs/README.md).
 
-The periodic network uses the same sine/cosine coordinate embedding and fully connected MLP across methods. The default has width 64, depth 4, `tanh`, Xavier-normal weights with gain 1, zero biases, and seed 7. This keeps the network core comparable while changing the boundary ansatz. Smooth `tanh` supports the strong-form residual's second derivatives. Width and depth set the network's capacity. These defaults reproduce the successful pilot; they have not been selected by a hyperparameter sweep.
+The periodic network uses the same sine/cosine coordinate embedding and fully connected MLP across methods. The default has width 64, depth 4, `tanh`, Xavier-normal weights with gain 1, zero biases, and seed 7. Width, depth, architecture, activation, initialization, and training controls come from the run configuration. Activation can be any `torch.nn` module class or a fully qualified import path for a custom `torch.nn.Module` or unary PyTorch callable, with constructor/function arguments in `model.activation_kwargs`. `SquaredReLU` is explicitly provided and computes `max(0,x)^2`. No smoothness or derivative check restricts the user’s choice. Since the strong-form residual uses second derivatives, some PyTorch modules can produce poor or unusable training behavior.
 
 The `device` and `dtype` settings select CPU or CUDA and float32 or float64. Full CPU training avoids allocating a GPU runtime but can be substantially slower.
 

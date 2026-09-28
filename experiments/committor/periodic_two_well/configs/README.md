@@ -14,12 +14,13 @@ Earlier exploratory run folders used a three-method objective and may contain `t
 |---|---:|---|
 | `methods` | all five methods | Selects which methods are trained: `simple_pinn`, `boundary_adapted`, `over_enforced`, `under_enforced`, and `variational_nitsche`. |
 | `device`, `dtype` | `cuda`, `float64` | Select `cpu` or `cuda` training, and `float32` or `float64`. Setup, preflight, and reference/data preparation use CPU; the training stage uses the configured device. Full CPU training avoids allocating a GPU runtime but can be much slower. |
-| `problem` | `a=1`, `b=0.6`, `epsilon=0.4`; centers `(0.25,0)` and `(0.75,0)`; radius `0.5` | Controls the periodic potential, diffusion strength, source/target centers, and target-set radius. |
+| `problem` | `a=1`, `b=0.6`, `epsilon=0.4`; centers `(0.25,0)` and `(0.75,0)`; radius `0.5` | Edit potential coefficients, diffusion strength, both set centers, and their common chordal radius on the fixed flat unit torus. The cosine potential formula and its phase centers stay fixed; moving set centers does not move its wells. The code rejects overlap and tangency. |
 | `seed` | 7 | Seeds network initialization and training-point sampling. Each method starts from the same seed so the underlying MLP starts comparably. |
 | `model.architecture` | `periodic_mlp` | Supported choices: `periodic_mlp` (first harmonic) and `periodic_fourier_mlp` (multiple harmonics), each followed by a fully connected MLP. |
 | `model.frequencies` | `[1,2,4]` for the Fourier option | Positive integer harmonics in the sine/cosine embedding. Higher frequencies can represent finer periodic variation, while increasing derivative magnitudes in the strong-form loss. |
 | `model.width`, `model.depth` | 64, 4 | Number of neurons per hidden layer and number of hidden layers. |
-| `model.activation` | `tanh` | Supported values: `tanh`, `relu`, `gelu`, `silu`, and `softplus`. Smooth activations are generally preferable for a strong-form PDE loss involving second derivatives. |
+| `model.activation` | `tanh` | Select any module class exported by `torch.nn` by class name, or use a fully qualified import path for a custom `torch.nn.Module` class or PyTorch callable. Examples include `CELU`, `PReLU`, `ReLU`, `torch.nn.functional.gelu`, or `your_package.activations.Indicator`. Names are case-insensitive when using a bare `torch.nn` name. `SquaredReLU` is also available explicitly. The selected activation is applied to hidden layers; the output layer remains linear. |
+| `model.activation_kwargs` | omitted | Optional JSON object passed as keyword arguments to an activation module constructor or callable. For example, use `{"beta": 2.0, "threshold": 12.0}` for Softplus or `{"approximate": "tanh"}` for `torch.nn.functional.gelu`. |
 | `model.initialization`, `model.gain` | `xavier_normal`, 1 | Weight initialization for every linear layer, including the output layer. Supported schemes: `xavier_normal` and `xavier_uniform`. Biases are zero. |
 | `training.epochs` | 6,000 per method | Number of optimizer steps for each selected method. There is no early stopping. |
 | `training.collocation_points` | 1,024 per epoch | Fresh uniform-in-domain points used for the strong PDE residual at each epoch. |
@@ -30,6 +31,8 @@ Earlier exploratory run folders used a three-method objective and may contain `t
 | `training.scheduler` | exponential, `gamma=0.9999` | Updated once per epoch. Supported schedules: `constant`, `exponential`, and `step`; a step schedule also takes `step_size_epochs`. The pilot schedule decreases the learning rate from 0.001 to about 0.00055 over 6,000 epochs. |
 | `training.log_interval_seconds` | 30 seconds | Wall-clock interval for live console reports. The first and final epochs are always reported. Shorten this to see more updates; lengthen it to reduce output. A full metric row is saved for every epoch regardless, so `losses.png` retains the complete loss history. |
 | `training.checkpoint_every` | 100 epochs | How often the restartable `last.pt` checkpoint is refreshed. The best and final checkpoints are also saved. |
+
+Bare activation names are resolved against torch.nn without a project-specific allowlist. A fully qualified import path can select any importable torch.nn.Module subclass or unary callable, including torch.nn.functional operations and a custom module such as your_package.activations.Indicator. Constructor or function keyword arguments are passed through from activation_kwargs. SquaredReLU computes max(0,x)^2 and is included because it is the activation used in the paper. ReLU, discontinuous functions, and other unsuitable choices remain available by deliberate selection. The strong-form objective differentiates the network twice; no smoothness or training-suitability filter is applied, so a poor choice may fail or train badly.
 
 ## Monte Carlo committor data
 
