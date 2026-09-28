@@ -34,6 +34,7 @@ from ....problems.committor.paper_methods import (
 )
 from ....problems.committor.periodic_two_well import InteriorSampler
 from ....problems.committor.training import (
+    _callable_fingerprint,
     PAPER_METHODS,
     PeriodicCommittorConfig,
     _build_periodic_committor_model,
@@ -43,6 +44,9 @@ from ....problems.committor.training import (
     run_periodic_committor,
     SchedulerFactory,
 )
+
+
+PREPARATION_SCHEMA_VERSION = 1
 
 
 def _git_revision() -> str | None:
@@ -65,6 +69,15 @@ def _hook_name(function: Callable[..., Any] | None, default: str) -> str:
     if function is None:
         return default
     return f"{function.__module__}.{function.__qualname__}"
+
+
+def _preparation_inputs(config: dict[str, Any]) -> dict[str, Any]:
+    """Settings that determine the saved reference and Monte Carlo labels."""
+    return {
+        "problem": config["problem"],
+        "reference_grid_sizes": config["reference_grid_sizes"],
+        "monte_carlo": config["training"].get("monte_carlo"),
+    }
 
 
 def _read_metrics(path: Path) -> list[dict[str, Any]]:
@@ -363,6 +376,7 @@ def _prepare_cpu_artifacts(
     interior_sampler: InteriorSampler | None = None,
 ) -> tuple[PeriodicCommittorReference, dict[str, float | None], CommittorMonteCarloData | None]:
     """Compute and save the CPU-only reference and shared Monte Carlo labels."""
+    write_json(output_dir / "preparation_config.json", raw)
     problem = PeriodicTwoWellCommittor(**raw["problem"])
     grid_sizes = [int(size) for size in raw["reference_grid_sizes"]]
     print(f"CPU preparation phase 1/2: finite-difference grids {grid_sizes}.", flush=True)
@@ -400,16 +414,18 @@ def _prepare_cpu_artifacts(
     write_json(output_dir / "cpu_preparation.json", {
         "completed_utc": datetime.now(timezone.utc).isoformat(),
         "preparation_git_revision": _git_revision(),
+        "preparation_schema_version": PREPARATION_SCHEMA_VERSION,
         "reference_file": reference_file,
         "reference_grid_sizes": grid_sizes,
         "reference_convergence": fd_diagnostics,
         "monte_carlo_file": "monte_carlo_labels.npz" if shared_mc_data is not None else None,
         "monte_carlo_metadata_file": "monte_carlo_labels.json" if shared_mc_data is not None else None,
         "monte_carlo_plot_file": "monte_carlo_anchors.png" if shared_mc_data is not None else None,
-        "config_file": "comparison_config.json",
+        "config_file": "preparation_config.json",
         "interior_sampler": _hook_name(
             interior_sampler, "uniform rejection on the punctured torus"
         ),
+        "interior_sampler_fingerprint": _callable_fingerprint(interior_sampler),
     })
     print(f"CPU preparation complete: {output_dir}", flush=True)
     return reference, fd_diagnostics, shared_mc_data
@@ -429,9 +445,37 @@ def _load_cpu_preparation(
             "Run the CPU preparation stage first."
         )
     preparation = json.loads(preparation_path.read_text(encoding="utf-8"))
+    saved_config_path = output_dir / str(
+        preparation.get("config_file", "preparation_config.json")
+    )
+    if not saved_config_path.is_file():
+        saved_config_path = output_dir / "comparison_config.json"
+    if saved_config_path.is_file():
+        saved_config = json.loads(saved_config_path.read_text(encoding="utf-8"))
+        if _preparation_inputs(saved_config) != _preparation_inputs(raw):
+            raise ValueError(
+                "The selected problem, reference grids, or Monte Carlo settings differ "
+                "from the saved CPU preparation. Restore the saved preparation settings, "
+                "or create a new folder for the changed preparation."
+            )
+    schema_version = preparation.get("preparation_schema_version", 1)
+    if schema_version != PREPARATION_SCHEMA_VERSION:
+        raise ValueError(
+            "The saved CPU preparation uses an incompatible data format. "
+            "Create a new preparation folder with the installed code."
+        )
     expected_sampler = _hook_name(
         interior_sampler, "uniform rejection on the punctured torus"
     )
+    saved_sampler_fingerprint = preparation.get("interior_sampler_fingerprint")
+    if (
+        saved_sampler_fingerprint is not None
+        and saved_sampler_fingerprint != _callable_fingerprint(interior_sampler)
+    ):
+        raise ValueError(
+            "The saved Monte Carlo anchors were generated with different sampler code. "
+            "Restore the sampler from preparation or create a new preparation folder."
+        )
     saved_sampler = preparation.get(
         "interior_sampler", "uniform rejection on the punctured torus"
     )
@@ -440,12 +484,18 @@ def _load_cpu_preparation(
             "The prepared Monte Carlo anchors used a different interior sampler. "
             "Restore the sampling function from the preparation notebook or prepare a new run."
         )
-    prepared_revision = preparation.get("preparation_git_revision")
-    active_revision = _git_revision()
-    if prepared_revision and active_revision and prepared_revision != active_revision:
+    schema_version = preparation.get("preparation_schema_version", 1)
+    if schema_version != PREPARATION_SCHEMA_VERSION:
         raise ValueError(
-            "The CPU reference and labels were prepared with a different repository revision. "
-            "Run CPU preparation again from the currently installed branch before training."
+            "The saved CPU preparation uses an incompatible data format. "
+            "Create a new preparation folder with the installed code."
+        )
+    if list(map(int, preparation.get("reference_grid_sizes", []))) != list(
+        map(int, raw["reference_grid_sizes"])
+    ):
+        raise ValueError(
+            "The saved finite-difference grids do not match the selected grid sizes. "
+            "Restore the saved grid sizes or create a new preparation folder."
         )
     expected_reference = f"reference_fd_{max(map(int, raw['reference_grid_sizes']))}.npz"
     reference_file = output_dir / str(preparation.get("reference_file", ""))
@@ -757,6 +807,13 @@ def run_periodic_comparison(
         raise FileNotFoundError(
             f"No completed CPU preparation in {output_dir}. Run the CPU preparation stage first."
         )
+    if train_prepared and not resume:
+        existing_checkpoints = list(output_dir.glob("*/last.pt"))
+        if existing_checkpoints:
+            raise FileExistsError(
+                f"{output_dir} already contains training checkpoints. "
+                "Use the resume option to continue, or prepare a new run folder."
+            )
     output_dir.mkdir(parents=True, exist_ok=True)
 
     config_record = output_dir / "comparison_config.json"
@@ -764,10 +821,20 @@ def run_periodic_comparison(
         raise FileNotFoundError(
             f"Prepared folder is missing its comparison_config.json: {output_dir}"
         )
+    previous_config: dict[str, Any] | None = None
     if config_record.is_file():
         previous_config = json.loads(config_record.read_text(encoding="utf-8"))
         if previous_config != raw:
-            raise ValueError("The saved comparison configuration differs from the selected configuration.")
+            if not train_prepared or resume:
+                raise ValueError(
+                    "The saved comparison configuration differs from the selected configuration."
+                )
+            if _preparation_inputs(previous_config) != _preparation_inputs(raw):
+                raise ValueError(
+                    "The selected problem, reference grids, or Monte Carlo settings differ "
+                    "from the saved CPU preparation. Restore the saved preparation settings, "
+                    "or create a new folder for the changed preparation."
+                )
     else:
         write_json(config_record, raw)
 
@@ -807,6 +874,22 @@ def run_periodic_comparison(
             raw, output_dir, interior_sampler=interior_sampler
         )
 
+    if train_prepared and not resume:
+        preparation_config_path = output_dir / "preparation_config.json"
+        if not preparation_config_path.is_file():
+            if previous_config is None:
+                raise FileNotFoundError(
+                    f"Prepared folder is missing its comparison_config.json: {output_dir}"
+                )
+            write_json(preparation_config_path, previous_config)
+        preparation_record_path = output_dir / "cpu_preparation.json"
+        preparation_record = json.loads(
+            preparation_record_path.read_text(encoding="utf-8")
+        )
+        preparation_record["config_file"] = "preparation_config.json"
+        write_json(preparation_record_path, preparation_record)
+        write_json(config_record, raw)
+
     problem = PeriodicTwoWellCommittor(**raw["problem"])
     grid_sizes = [int(size) for size in raw["reference_grid_sizes"]]
     requested_device = torch.device(str(raw["device"]))
@@ -821,6 +904,12 @@ def run_periodic_comparison(
         ),
         "optimizer": _hook_name(optimizer_factory, "repository optimizer builder"),
         "scheduler": _hook_name(scheduler_factory, "repository scheduler builder"),
+    }
+    metadata["runtime_hook_fingerprints"] = {
+        "model": _callable_fingerprint(model_factory),
+        "interior_sampler": _callable_fingerprint(interior_sampler),
+        "optimizer": _callable_fingerprint(optimizer_factory),
+        "scheduler": _callable_fingerprint(scheduler_factory),
     }
     metadata.setdefault("training_started_utc", now)
     metadata["git_revision"] = revision
@@ -930,11 +1019,28 @@ def evaluate_saved_models(
     dtype = _dtype(str(raw["dtype"]))
     device = torch.device("cpu")
     batch_size = int(raw.get("evaluation_batch_size", 16_384))
+    current_model_fingerprint = _callable_fingerprint(model_factory)
     metadata_path = output_dir / "comparison_metadata.json"
     metadata = json.loads(metadata_path.read_text(encoding="utf-8")) if metadata_path.is_file() else {}
     methods: dict[str, dict[str, Any]] = {}
 
     for method in raw["methods"]:
+        method_metadata_path = output_dir / method / "metadata.json"
+        method_metadata = (
+            json.loads(method_metadata_path.read_text(encoding="utf-8"))
+            if method_metadata_path.is_file()
+            else {}
+        )
+        saved_model_fingerprint = method_metadata.get(
+            "runtime_hook_fingerprints", {}
+        ).get("model")
+        if (
+            saved_model_fingerprint is not None
+            and saved_model_fingerprint != current_model_fingerprint
+        ):
+            raise ValueError(
+                f"The model code for {method} differs from the saved checkpoint."
+            )
         config = PeriodicCommittorConfig(
             seed=int(raw["seed"]),
             device="cpu",

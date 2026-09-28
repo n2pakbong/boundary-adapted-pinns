@@ -1,11 +1,15 @@
 import numpy as np
 import math
+import json
 import pytest
 import torch
 
 from boundary_pinn.models import LiftedBoundaryFactorPINN, MLP, PeriodicMLP, SquaredReLU
 from boundary_pinn.problems.committor import PeriodicTwoWellCommittor
-from boundary_pinn.problems.committor.periodic_two_well import sample_interior_points
+from boundary_pinn.problems.committor.periodic_two_well import (
+    _device_request_matches,
+    sample_interior_points,
+)
 from boundary_pinn.problems.committor.reference import (
     PeriodicCommittorReference,
     periodic_reference_errors,
@@ -61,6 +65,24 @@ def test_squared_relu_is_available_as_an_explicit_activation() -> None:
     assert any(isinstance(module, SquaredReLU) for module in network.modules())
 
 
+def test_callback_fingerprint_detects_changed_code_with_same_name() -> None:
+    from boundary_pinn.problems.committor.training import (
+        _callable_fingerprint,
+        _callable_name,
+    )
+
+    def callback(value):
+        return value + 1
+
+    original = callback
+
+    def callback(value):
+        return value + 2
+
+    assert _callable_name(original, "default") == _callable_name(callback, "default")
+    assert _callable_fingerprint(original) != _callable_fingerprint(callback)
+
+
 def test_functional_pytorch_activation_import_path_accepts_kwargs() -> None:
     from boundary_pinn.models import _activation
 
@@ -112,6 +134,24 @@ def test_user_interior_sampler_must_return_points_inside_the_domain() -> None:
         sample_interior_points(
             problem, 2, device="cpu", dtype=torch.float64, sampler=invalid_sampler
         )
+
+
+@pytest.mark.parametrize(
+    ("actual", "requested", "current_device", "expected"),
+    [
+        (torch.device("cuda:0"), torch.device("cuda"), 0, True),
+        (torch.device("cuda:1"), torch.device("cuda"), 0, False),
+        (torch.device("cuda:1"), torch.device("cuda"), 1, True),
+        (torch.device("cuda:1"), torch.device("cuda:0"), 1, False),
+        (torch.device("cpu"), torch.device("cpu"), 0, True),
+        (torch.device("cpu"), torch.device("cuda"), 0, False),
+    ],
+)
+def test_unindexed_device_request_matches_current_device(
+    actual, requested, current_device, expected, monkeypatch
+) -> None:
+    monkeypatch.setattr(torch.cuda, "current_device", lambda: current_device)
+    assert _device_request_matches(actual, requested) is expected
 
 
 @pytest.mark.parametrize(
@@ -378,6 +418,7 @@ def test_comparison_accepts_plain_pytorch_model_sampler_optimizer_and_scheduler(
     assert (output_dir / "simple_pinn" / "best.pt").is_file()
     metadata = json.loads((output_dir / "simple_pinn" / "metadata.json").read_text())
     assert metadata["runtime_hooks"]["model"].endswith("make_model")
+    assert metadata["runtime_hook_fingerprints"]["model"]
     assert metadata["runtime_hooks"]["interior_sampler"].endswith("sample_points")
     for method in config["methods"]:
         assert (output_dir / method / "last.pt").is_file()
@@ -408,6 +449,10 @@ def test_comparison_accepts_plain_pytorch_model_sampler_optimizer_and_scheduler(
         assert f"{method} | epoch 1/1" in captured
     with pytest.raises(FileExistsError, match="already contains a run"):
         run_periodic_comparison(config_path, output_dir, model_factory=make_model)
+    with pytest.raises(FileExistsError, match="training checkpoints"):
+        run_periodic_comparison(
+            config_path, output_dir, train_prepared=True, model_factory=make_model
+        )
 
 
 @pytest.mark.parametrize("activation", ["tanh", "relu", "gelu", "silu", "softplus"])
@@ -642,6 +687,120 @@ def test_five_paper_methods_report_every_final_loss_component_on_cpu(tmp_path, m
     }
 
 
+def test_cpu_preparation_reuse_ignores_code_revision_but_checks_schema(
+    tmp_path, monkeypatch
+) -> None:
+    import boundary_pinn.experiments.committor.periodic_two_well.comparison as comparison
+
+    raw = {
+        "problem": {
+            "a": 1.0,
+            "b": 0.6,
+            "epsilon": 0.4,
+            "source_center": [0.25, 0.0],
+            "target_center": [0.75, 0.0],
+            "set_radius": 0.5,
+        },
+        "reference_grid_sizes": [16, 32],
+        "training": {},
+    }
+    monkeypatch.setattr(comparison, "_git_revision", lambda: "preparation-revision")
+    comparison._prepare_cpu_artifacts(raw, tmp_path)
+    marker_path = tmp_path / "cpu_preparation.json"
+    marker = json.loads(marker_path.read_text(encoding="utf-8"))
+    marker.pop("preparation_schema_version")
+    marker_path.write_text(json.dumps(marker), encoding="utf-8")
+
+    monkeypatch.setattr(comparison, "_git_revision", lambda: "new-training-revision")
+    reference, _, _ = comparison._load_cpu_preparation(raw, tmp_path)
+    assert reference.values.shape == (32, 32)
+
+    marker["preparation_schema_version"] = 999
+    marker_path.write_text(json.dumps(marker), encoding="utf-8")
+    with pytest.raises(ValueError, match="incompatible data format"):
+        comparison._load_cpu_preparation(raw, tmp_path)
+
+
+def test_training_settings_can_change_without_repeating_cpu_preparation(
+    tmp_path, capsys
+) -> None:
+    from boundary_pinn.experiments.committor.periodic_two_well.comparison import (
+        run_periodic_comparison,
+    )
+
+    class TinyPeriodicNetwork(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.layers = torch.nn.Sequential(
+                torch.nn.Linear(4, 8), torch.nn.Tanh(), torch.nn.Linear(8, 1)
+            )
+
+        def forward(self, x):
+            phase = 2.0 * torch.pi * x
+            features = torch.cat((torch.sin(phase), torch.cos(phase)), dim=-1)
+            return self.layers(features).squeeze(-1)
+
+    config = {
+        "seed": 7,
+        "device": "cpu",
+        "dtype": "float64",
+        "methods": ["simple_pinn"],
+        "problem": {
+            "a": 1.0,
+            "b": 0.6,
+            "epsilon": 0.4,
+            "source_center": [0.25, 0.0],
+            "target_center": [0.75, 0.0],
+            "set_radius": 0.5,
+        },
+        "training": {
+            "epochs": 1,
+            "collocation_points": 8,
+            "boundary_points": 4,
+            "boundary_weight": 10.0,
+            "learning_rate": 1.0e-3,
+            "lr_gamma": 1.0,
+            "checkpoint_every": 1,
+            "log_every": 1,
+        },
+        "reference_grid_sizes": [16, 32],
+        "evaluation_batch_size": 128,
+    }
+    config_path = tmp_path / "selected.json"
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    output_dir = tmp_path / "prepared"
+
+    run_periodic_comparison(config_path, output_dir, prepare_only=True)
+    config["training"]["epochs"] = 2
+    config["training"]["collocation_points"] = 12
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    run_periodic_comparison(
+        config_path,
+        output_dir,
+        train_prepared=True,
+        model_factory=TinyPeriodicNetwork,
+    )
+
+    preparation_config = json.loads(
+        (output_dir / "preparation_config.json").read_text(encoding="utf-8")
+    )
+    training_config = json.loads(
+        (output_dir / "comparison_config.json").read_text(encoding="utf-8")
+    )
+    assert preparation_config["training"]["epochs"] == 1
+    assert training_config["training"]["epochs"] == 2
+    preparation_marker = json.loads(
+        (output_dir / "cpu_preparation.json").read_text(encoding="utf-8")
+    )
+    assert preparation_marker["config_file"] == "preparation_config.json"
+    epochs = [
+        json.loads(line)["epoch"]
+        for line in (output_dir / "simple_pinn" / "metrics.jsonl").read_text().splitlines()
+    ]
+    assert epochs == [1, 2]
+    assert "Loaded CPU-prepared reference and shared labels" in capsys.readouterr().out
+
+
 def test_cpu_preparation_uses_no_cuda_even_when_training_config_requests_it(tmp_path, monkeypatch) -> None:
     import json
 
@@ -709,6 +868,18 @@ def test_loss_plot_handles_nonfinite_and_zero_series_without_log_warning(tmp_pat
     assert destination.is_file()
     assert not any("no positive values" in str(warning.message).lower() for warning in caught)
 
+
+
+def test_resume_discards_metrics_after_last_checkpoint(tmp_path) -> None:
+    from boundary_pinn.problems.committor.training import _truncate_metrics_to_epoch
+
+    path = tmp_path / "metrics.jsonl"
+    path.write_text(
+        '{"epoch": 1}\n{"epoch": 2}\n{"epoch": 3}\n{"partial":',
+        encoding="utf-8",
+    )
+    _truncate_metrics_to_epoch(path, checkpoint_epoch=2)
+    assert [json.loads(line)["epoch"] for line in path.read_text().splitlines()] == [1, 2]
 
 
 def test_wall_clock_controls_console_only_and_metrics_keep_every_epoch(tmp_path, capsys) -> None:
