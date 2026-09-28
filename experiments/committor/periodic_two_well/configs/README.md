@@ -13,9 +13,9 @@ This page documents the versioned command-line presets, [`gpu_pilot.json`](gpu_p
 | `problem` | `a=1`, `b=0.6`, `epsilon=0.4`; centers `(0.25,0)` and `(0.75,0)`; radius `0.5` | Coefficients, target-set centers, and common chordal radius on the fixed flat unit torus. The cosine potential formula remains fixed. Overlapping or touching sets are rejected. |
 | `seed` | 7 | Random seed for the built-in model and training samples. |
 | `model.architecture` | `periodic_mlp` | Built-in options are `periodic_mlp` (one sine/cosine frequency) and `periodic_fourier_mlp` (multiple frequencies). Both apply an explicit periodic feature map before a fully connected MLP. |
-| `model.width`, `model.depth` | 64, 4 | Hidden-layer width and number of hidden layers for the built-in MLP. |
+| `model.width`, `model.depth` | 64, 2 | Hidden-layer width and number of hidden layers for the built-in MLP. |
 | `model.activation`, `model.activation_kwargs` | `tanh` | A `torch.nn` module name or importable callable path, plus optional constructor keyword arguments. This setting applies only to the built-in MLP. For a custom activation class, define it in Python and use the notebook workflow. |
-| `model.initialization`, `model.gain` | `xavier_normal`, 1 | The built-in JSON model accepts `xavier_normal` or `xavier_uniform`; biases are zero. For any `torch.nn.init` code or custom initializer, use the notebook's visible Python function. |
+| `model.initialization` | `pytorch_default` | Use the initialization from PyTorch's `nn.Linear` layers. Optional Xavier normal/uniform initialization is available with `model.gain`; for custom `torch.nn.init` code, edit the notebook class. |
 | `training.epochs` | 6,000 | Optimizer updates per selected method. |
 | `training.collocation_points` | 1,024 | Interior PDE points resampled at each epoch. The built-in law proposes points uniformly on `[0,1)^2` and rejects points in A or B, producing uniform area samples on D. |
 | `training.boundary_points` | 256 per boundary | Radial-angle boundary samples used by the simple PINN. Arclength weights correct the boundary integral. Nitsche has a separate boundary quadrature count. |
@@ -44,7 +44,7 @@ The saved metadata includes standard errors and path-resolution fractions. The f
 
 ## Nitsche and reference settings
 
-`training.nitsche` contains the volume-point, Gaussian test-function, boundary-point, test-width, stabilization, and boundary-scale settings used only by the variational method. The finite-difference reference grids default to `[128, 256]`; the finer grid is used for reported errors, and their difference estimates reference sensitivity. `evaluation_batch_size` controls how many grid points are processed at once.
+`training.nitsche` contains the volume-point, Gaussian test-function, boundary-point, test-width, stabilization, and boundary-scale settings used only by the variational method. The finite-difference reference grids default to `[128, 256]`; the finer grid is used for reported errors, and their difference estimates reference sensitivity. The GPU pilot and Colab notebook both use `evaluation_batch_size = 8192`: the network evaluates 8,192 grid points at a time when calculating errors after training.
 
 ## Prepare and train
 
