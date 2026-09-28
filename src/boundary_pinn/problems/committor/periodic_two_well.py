@@ -222,6 +222,17 @@ class PeriodicTwoWellCommittor:
         return self.generator(model(x).reshape(-1), x)
 
 
+def _device_request_matches(
+    actual: torch.device, requested: torch.device | str
+) -> bool:
+    """Treat an unindexed device request such as cuda as the current device."""
+    actual_device = torch.device(actual)
+    requested_device = torch.device(requested)
+    return actual_device.type == requested_device.type and (
+        requested_device.index is None or actual_device.index == requested_device.index
+    )
+
+
 def sample_interior_points(
     problem: PeriodicTwoWellCommittor,
     n: int,
@@ -249,7 +260,7 @@ def sample_interior_points(
         raise TypeError("an interior sampler must return a torch.Tensor")
     if points.shape != (n, 2):
         raise ValueError(f"an interior sampler must return shape ({n}, 2)")
-    if points.device != torch.device(device) or points.dtype != dtype:
+    if not _device_request_matches(points.device, device) or points.dtype != dtype:
         raise ValueError("an interior sampler must honor the requested device and dtype")
     if not bool(torch.all(problem.domain_mask(points))):
         raise ValueError("an interior sampler returned points outside the open domain D")
