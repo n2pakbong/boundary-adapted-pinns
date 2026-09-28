@@ -405,7 +405,7 @@ def test_comparison_accepts_plain_pytorch_model_sampler_optimizer_and_scheduler(
     for method in config["methods"]:
         assert f"{method} | epoch 1/1" in captured
     with pytest.raises(FileExistsError, match="already contains a run"):
-        run_periodic_comparison(config_path, output_dir)
+        run_periodic_comparison(config_path, output_dir, model_factory=make_model)
 
 
 @pytest.mark.parametrize("activation", ["tanh", "relu", "gelu", "silu", "softplus"])
