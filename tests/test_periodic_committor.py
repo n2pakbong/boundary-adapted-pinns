@@ -65,6 +65,24 @@ def test_squared_relu_is_available_as_an_explicit_activation() -> None:
     assert any(isinstance(module, SquaredReLU) for module in network.modules())
 
 
+def test_callback_fingerprint_detects_changed_code_with_same_name() -> None:
+    from boundary_pinn.problems.committor.training import (
+        _callable_fingerprint,
+        _callable_name,
+    )
+
+    def callback(value):
+        return value + 1
+
+    original = callback
+
+    def callback(value):
+        return value + 2
+
+    assert _callable_name(original, "default") == _callable_name(callback, "default")
+    assert _callable_fingerprint(original) != _callable_fingerprint(callback)
+
+
 def test_functional_pytorch_activation_import_path_accepts_kwargs() -> None:
     from boundary_pinn.models import _activation
 
@@ -400,6 +418,7 @@ def test_comparison_accepts_plain_pytorch_model_sampler_optimizer_and_scheduler(
     assert (output_dir / "simple_pinn" / "best.pt").is_file()
     metadata = json.loads((output_dir / "simple_pinn" / "metadata.json").read_text())
     assert metadata["runtime_hooks"]["model"].endswith("make_model")
+    assert metadata["runtime_hook_fingerprints"]["model"]
     assert metadata["runtime_hooks"]["interior_sampler"].endswith("sample_points")
     for method in config["methods"]:
         assert (output_dir / method / "last.pt").is_file()
