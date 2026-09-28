@@ -789,6 +789,10 @@ def test_training_settings_can_change_without_repeating_cpu_preparation(
     )
     assert preparation_config["training"]["epochs"] == 1
     assert training_config["training"]["epochs"] == 2
+    preparation_marker = json.loads(
+        (output_dir / "cpu_preparation.json").read_text(encoding="utf-8")
+    )
+    assert preparation_marker["config_file"] == "preparation_config.json"
     epochs = [
         json.loads(line)["epoch"]
         for line in (output_dir / "simple_pinn" / "metrics.jsonl").read_text().splitlines()
