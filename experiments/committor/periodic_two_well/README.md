@@ -211,19 +211,19 @@ The example's geometry remains the flat unit torus with two equal-radius periodi
 
 The paper's numerical results are not reproduced by this added committor example. The paper's OU and double-well experiments use width-30 tanh networks with two and three hidden layers, respectively. It does not include the periodic feature map or a committor experiment. The committor notebook uses the same boundary-enforcement methods in an added periodic example, with its own network size and training setup.
 
-Save a copy of the notebook with your edits next to the Drive run folder. The run folder saves scalar settings and callback names, but not notebook-cell source. Evaluation and resume require the same model, sampler, optimizer, and schedule code. The command-line preset remains available for the versioned built-in model; see the [configuration guide](configs/README.md).
+Save a copy of the notebook with your edits next to the Drive run folder. `preparation_config.json` records the settings used to make the reference and Monte Carlo labels; `comparison_config.json` records the settings used for training. The run folder records callback names, but not notebook-cell source. Evaluation and resume require the same model, sampler, optimizer, and schedule code. The command-line preset remains available for the versioned built-in model; see the [configuration guide](configs/README.md).
 
 ## Run sequence and compute used
 
 1. **Choose the runtime and run Setup:** set `DEVICE` in the notebook, then choose GPU for `cuda` or CPU for `cpu` before Setup. Setup installs the selected repository revision and runs tests in a child process with CUDA hidden; the notebook keeps its selected runtime.
 2. **CPU preflight:** run the tiny packaged pipeline check with one epoch and coarse references. It uses CPU and does not exercise edited notebook callbacks or measure scientific accuracy. Its outputs are temporary under Colab `/content` and do not go to Drive.
-3. **Notebook code check:** smoke-test the edited model, sampler, optimizer, and scheduler before preparation.
-4. **CPU preparation:** run the notebook's Python API with the selected problem, Monte Carlo settings, and interior-sampling function. It solves the finite-difference reference grids and generates the shared Feynman–Kac labels on CPU, even when a GPU runtime is attached. Live path and resolution progress appears in the notebook cell. Completed references, labels, metadata, and the anchor plot go to a dated Drive folder.
+3. **Notebook code check:** on the selected device, test the edited sampler through the package validator, compute one PDE batch, and perform a throwaway optimizer and scheduler step before preparation.
+4. **CPU preparation:** run the notebook's Python API with the selected problem, reference grids, Monte Carlo settings, and interior-sampling function. These determine the saved reference and labels; changing one requires new CPU preparation. The reference and shared Feynman–Kac labels are generated on CPU, even when a GPU runtime is attached. Live path and resolution progress appears in the notebook cell. Completed references, labels, preparation settings, metadata, and the anchor plot go to a dated Drive folder. The selected methods and training settings can still be changed before training without repeating preparation.
 5. **Training:** run the Python API with the same Drive folder and the model class, sampler, optimizer, and scheduler code defined above. Training runs on the device in `DEVICE`; keep the runtime selected before Setup. No runtime change or repeat of CPU preparation is needed. Training reports epoch, elapsed time, ETA, objective, and active raw loss components. Metrics and checkpoints are saved to Drive.
 6. **Inspect or evaluate:** read the saved metrics and plots or reevaluate saved checkpoints on CPU.
-7. **Resume:** rerun the notebook's model and callback cells, then call the resume cell with the existing run folder. Use the same source code and repository revision. The runner checks the revision and callback names, but cannot detect edits inside notebook cells; if any custom code changed, start a new run folder.
+7. **Resume:** rerun the notebook's model and callback cells, then call the resume cell with the existing run folder. Use the same model, sampler, optimizer, and scheduler code. The runner checks the saved-data format, training objective version, and callback names, but cannot detect edits inside notebook cells; if custom code changed, start a new run folder.
 
-A manual runtime reset clears notebook variables and local files. Rerun Setup with the same branch and the cells that define the custom functions before training, evaluation, or resume. Completed CPU preparation in Drive does not need to be repeated. The five-method pilot is a single-seed exploratory run, not a final paper result; a paper study needs multiple seeds, reference-grid and Monte Carlo convergence checks, and matched compute budgets.
+A manual runtime reset clears notebook variables and local files. Rerun Setup and the cells that define the custom functions before training, evaluation, or resume. Compatible CPU preparation in Drive does not need to be repeated after a code-only update. The five-method pilot is a single-seed exploratory run, not a final paper result; a paper study needs multiple seeds, reference-grid and Monte Carlo convergence checks, and matched compute budgets.
 
 For a terminal run using the built-in model and the versioned pilot configuration, use the same output directory for both stages:
 
@@ -248,7 +248,7 @@ periodic-committor experiments/committor/periodic_two_well/configs/gpu_pilot.jso
 | `experiments/committor/periodic_two_well/configs/gpu_pilot.json` | Explicit single-seed five-method exploratory settings. |
 | `colab/periodic_committor.ipynb` | Colab workflow, derivation, method definitions, and visible output tables. |
 
-Each dated experiment folder contains `comparison_config.json`, `comparison_metadata.json`, the FDM reference `.npz`, shared `monte_carlo_labels.npz` and `.json`, `summary.json`, `losses.png`, diagnostic solution figures, and one folder per method. Each method folder contains its `metrics.jsonl`, `final_training_metrics.json`, `best.pt`, and resumable `last.pt`.
+Each dated experiment folder contains `preparation_config.json`, `comparison_config.json`, `comparison_metadata.json`, the FDM reference `.npz`, shared `monte_carlo_labels.npz` and `.json`, `summary.json`, `losses.png`, diagnostic solution figures, and one folder per method. Each method folder contains its `metrics.jsonl`, `final_training_metrics.json`, `best.pt`, and resumable `last.pt`.
 
 ## References
 
