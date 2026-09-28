@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
+import inspect
 import json
+import types
 import platform
 import random
 import time
@@ -45,6 +48,41 @@ def _callable_name(function: Callable[..., Any] | None, default: str) -> str:
     if function is None:
         return default
     return f"{function.__module__}.{function.__qualname__}"
+
+def _callable_fingerprint(callback: Callable[..., Any] | None) -> str | None:
+    """Hash callback source, with a stable code-object fallback for interactive cells."""
+    if callback is None:
+        return None
+    try:
+        source = inspect.getsource(callback).encode("utf-8")
+    except (OSError, TypeError):
+        code_objects = []
+        members = vars(callback).items() if isinstance(callback, type) else (("__call__", callback),)
+        for name, member in members:
+            code = getattr(member, "__code__", None)
+            if code is None:
+                continue
+
+            def describe(code_object: types.CodeType) -> dict[str, Any]:
+                return {
+                    "bytecode": code_object.co_code.hex(),
+                    "names": code_object.co_names,
+                    "variables": code_object.co_varnames,
+                    "constants": [
+                        describe(value) if isinstance(value, types.CodeType) else repr(value)
+                        for value in code_object.co_consts
+                    ],
+                }
+
+            code_objects.append((name, describe(code)))
+        if not code_objects:
+            return None
+        source = json.dumps(code_objects, sort_keys=True).encode("utf-8")
+    defaults = repr((
+        getattr(callback, "__defaults__", None),
+        getattr(callback, "__kwdefaults__", None),
+    )).encode("utf-8")
+    return hashlib.sha256(source + defaults).hexdigest()
 
 @dataclass(frozen=True)
 class PeriodicCommittorConfig:
