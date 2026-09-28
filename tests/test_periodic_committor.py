@@ -118,16 +118,20 @@ def test_user_interior_sampler_must_return_points_inside_the_domain() -> None:
 
 
 @pytest.mark.parametrize(
-    ("actual", "requested", "expected"),
+    ("actual", "requested", "current_device", "expected"),
     [
-        (torch.device("cuda:0"), torch.device("cuda"), True),
-        (torch.device("cuda:1"), torch.device("cuda"), True),
-        (torch.device("cuda:1"), torch.device("cuda:0"), False),
-        (torch.device("cpu"), torch.device("cpu"), True),
-        (torch.device("cpu"), torch.device("cuda"), False),
+        (torch.device("cuda:0"), torch.device("cuda"), 0, True),
+        (torch.device("cuda:1"), torch.device("cuda"), 0, False),
+        (torch.device("cuda:1"), torch.device("cuda"), 1, True),
+        (torch.device("cuda:1"), torch.device("cuda:0"), 1, False),
+        (torch.device("cpu"), torch.device("cpu"), 0, True),
+        (torch.device("cpu"), torch.device("cuda"), 0, False),
     ],
 )
-def test_unindexed_device_request_matches_current_device(actual, requested, expected) -> None:
+def test_unindexed_device_request_matches_current_device(
+    actual, requested, current_device, expected, monkeypatch
+) -> None:
+    monkeypatch.setattr(torch.cuda, "current_device", lambda: current_device)
     assert _device_request_matches(actual, requested) is expected
 
 
