@@ -2,38 +2,129 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import importlib
+from collections.abc import Callable, Mapping
+from typing import Any
 
 import torch
 from torch import nn
 
 
-def _activation(name: str) -> Callable[[], nn.Module]:
-    activations: dict[str, Callable[[], nn.Module]] = {
-        "tanh": nn.Tanh,
-        "relu": nn.ReLU,
-        "gelu": nn.GELU,
-        "silu": nn.SiLU,
-        "softplus": nn.Softplus,
-    }
+class SquaredReLU(nn.Module):
+    """Squared rectified linear unit, x -> max(0, x)^2."""
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return torch.relu(x).square()
+
+
+class _CallableActivation(nn.Module):
+    """Wrap a stateless PyTorch callable as a module with configured arguments."""
+
+    def __init__(self, function: Callable[..., torch.Tensor], kwargs: Mapping[str, Any]):
+        super().__init__()
+        self.function = function
+        self.kwargs = dict(kwargs)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.function(x, **self.kwargs)
+
+
+def _activation(name: str, kwargs: Mapping[str, Any] | None = None) -> nn.Module:
+    """Build an activation from a PyTorch module name or importable callable path.
+
+    Bare names resolve against torch.nn. Qualified paths can select any
+    importable nn.Module subclass or unary tensor callable; constructor or
+    function keyword arguments are passed through from the run configuration.
+    """
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("activation must be a nonempty module name or import path")
+
+    if kwargs is None:
+        options: dict[str, Any] = {}
+    elif isinstance(kwargs, Mapping):
+        options = dict(kwargs)
+    else:
+        raise TypeError("activation_kwargs must be a mapping of constructor arguments")
+
+    module_name = name.strip()
+    if module_name.lower() == "squaredrelu":
+        activation_type: type[nn.Module] | None = SquaredReLU
+    else:
+        bare_name = module_name[3:] if module_name.startswith("nn.") else module_name
+        target: Any = None
+        if "." not in bare_name:
+            for namespace in (nn, nn.modules.activation):
+                candidate = getattr(namespace, bare_name, None)
+                if isinstance(candidate, type) and issubclass(candidate, nn.Module):
+                    target = candidate
+                    break
+                candidate = next(
+                    (
+                        value
+                        for exported_name, value in vars(namespace).items()
+                        if exported_name.lower() == bare_name.lower()
+                        and isinstance(value, type)
+                        and issubclass(value, nn.Module)
+                    ),
+                    None,
+                )
+                if candidate is not None:
+                    target = candidate
+                    break
+        else:
+            module_path, _, attribute_path = bare_name.rpartition(".")
+            try:
+                target = importlib.import_module(module_path)
+                for attribute in attribute_path.split("."):
+                    target = getattr(target, attribute)
+            except (ImportError, AttributeError) as error:
+                raise ValueError(
+                    f"Could not resolve activation import path {name!r}"
+                ) from error
+
+        if isinstance(target, type) and issubclass(target, nn.Module):
+            activation_type = target
+        elif callable(target) and not isinstance(target, type):
+            return _CallableActivation(target, options)
+        else:
+            raise ValueError(
+                f"Activation {name!r} must name a PyTorch nn.Module class "
+                "or an importable callable."
+            )
+
     try:
-        return activations[name.lower()]
-    except KeyError as error:
-        choices = ", ".join(sorted(activations))
-        raise ValueError(f"Unknown activation {name!r}; choose one of: {choices}.") from error
+        return activation_type(**options)
+    except (TypeError, ValueError) as error:
+        raise ValueError(
+            f"Could not construct activation {name!r} with arguments {options!r}: {error}"
+        ) from error
 
 
 class MLP(nn.Module):
     """Scalar fully connected network with an explicit input/output dimension."""
 
-    def __init__(self, input_dim: int, width: int, depth: int, activation: str = "tanh"):
+    def __init__(
+        self,
+        input_dim: int,
+        width: int,
+        depth: int,
+        activation: str = "tanh",
+        activation_kwargs: Mapping[str, Any] | None = None,
+    ):
         super().__init__()
         if depth < 1:
             raise ValueError("depth must be at least one hidden layer")
-        make_activation = _activation(activation)
-        layers: list[nn.Module] = [nn.Linear(input_dim, width), make_activation()]
+        layers: list[nn.Module] = [
+            nn.Linear(input_dim, width),
+            _activation(activation, activation_kwargs),
+        ]
         for _ in range(depth - 1):
-            layers.extend((nn.Linear(width, width), make_activation()))
+            layers.extend(
+                (
+                    nn.Linear(width, width),
+                    _activation(activation, activation_kwargs),
+                )
+            )
         layers.append(nn.Linear(width, 1))
         self.network = nn.Sequential(*layers)
 

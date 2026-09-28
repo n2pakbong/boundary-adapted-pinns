@@ -96,6 +96,7 @@ def _initialize_mlp(model_config: dict[str, Any], *, input_dim: int = 2) -> MLP:
         width=int(model_config["width"]),
         depth=int(model_config["depth"]),
         activation=str(model_config.get("activation", "tanh")),
+        activation_kwargs=model_config.get("activation_kwargs"),
     )
     initialization = str(model_config.get("initialization", "xavier_normal")).lower()
     gain = float(model_config.get("gain", 1.0))

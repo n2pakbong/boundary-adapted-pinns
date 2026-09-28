@@ -7,6 +7,7 @@ the same expressions can be differentiated directly by PyTorch.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import torch
@@ -34,6 +35,29 @@ class PeriodicTwoWellCommittor:
             raise ValueError("epsilon must be positive")
         if not 0 < self.set_radius < 1:
             raise ValueError("set_radius must lie in (0, 1) for this sampler")
+        for name, center in (
+            ("source_center", self.source_center),
+            ("target_center", self.target_center),
+        ):
+            if len(center) != 2:
+                raise ValueError(f"{name} must contain two torus coordinates")
+            if any(not math.isfinite(float(coordinate)) for coordinate in center):
+                raise ValueError(f"{name} must contain finite coordinates")
+
+        # For equal-radius product-chordal balls, the wrapped midpoint
+        # minimizes the larger of the two distances to the centers.
+        wrapped_delta = tuple(
+            (float(target) - float(source) + 0.5) % 1.0 - 0.5
+            for source, target in zip(self.source_center, self.target_center, strict=True)
+        )
+        midpoint_radius = 2.0 * math.sqrt(
+            sum(math.sin(math.pi * delta / 2.0) ** 2 for delta in wrapped_delta)
+        )
+        if midpoint_radius <= self.set_radius + 1.0e-12:
+            raise ValueError(
+                "source and target periodic disks overlap or touch; "
+                "choose disjoint centers or a smaller set_radius"
+            )
 
     @staticmethod
     def _center_tensor(

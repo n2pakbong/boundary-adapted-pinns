@@ -1,8 +1,9 @@
 import numpy as np
+import math
 import pytest
 import torch
 
-from boundary_pinn.models import LiftedBoundaryFactorPINN, MLP, PeriodicMLP
+from boundary_pinn.models import LiftedBoundaryFactorPINN, MLP, PeriodicMLP, SquaredReLU
 from boundary_pinn.problems.committor import PeriodicTwoWellCommittor
 from boundary_pinn.problems.committor.reference import (
     PeriodicCommittorReference,
@@ -13,6 +14,110 @@ from boundary_pinn.problems.committor.reference import (
 
 def _problem() -> PeriodicTwoWellCommittor:
     return PeriodicTwoWellCommittor()
+
+
+def test_periodic_committor_rejects_overlapping_sets() -> None:
+    with pytest.raises(ValueError, match="overlap or touch"):
+        PeriodicTwoWellCommittor(
+            source_center=(0.25, 0.0),
+            target_center=(0.26, 0.0),
+            set_radius=0.1,
+        )
+
+
+def test_periodic_committor_rejects_touching_sets() -> None:
+    touching_radius = 2.0 * math.sin(math.pi * 0.1 / 2.0)
+    with pytest.raises(ValueError, match="overlap or touch"):
+        PeriodicTwoWellCommittor(
+            source_center=(0.0, 0.0),
+            target_center=(0.1, 0.0),
+            set_radius=touching_radius,
+        )
+
+
+def test_periodic_committor_accepts_disjoint_chordal_disks() -> None:
+    # The center distance is below twice the radius, but their midpoint
+    # distance still exceeds the radius, so these chordal disks are disjoint.
+    problem = PeriodicTwoWellCommittor(
+        source_center=(0.0, 0.0),
+        target_center=(0.1, 0.0),
+        set_radius=0.31,
+    )
+    assert problem.source_center == (0.0, 0.0)
+
+
+def test_squared_relu_is_available_as_an_explicit_activation() -> None:
+    values = torch.tensor([-2.0, -0.5, 0.0, 0.5, 2.0])
+    expected = torch.tensor([0.0, 0.0, 0.0, 0.25, 4.0])
+    assert torch.equal(SquaredReLU()(values), expected)
+
+    from boundary_pinn.problems.committor.training import _initialize_mlp
+
+    network = _initialize_mlp(
+        {"width": 4, "depth": 1, "activation": "SquaredReLU"},
+        input_dim=2,
+    )
+    assert any(isinstance(module, SquaredReLU) for module in network.modules())
+
+
+def test_functional_pytorch_activation_import_path_accepts_kwargs() -> None:
+    from boundary_pinn.models import _activation
+
+    activation = _activation("torch.nn.functional.gelu", {"approximate": "tanh"})
+    values = torch.tensor([-1.0, 0.0, 1.0])
+    assert torch.isfinite(activation(values)).all()
+
+
+def test_custom_indicator_module_is_available_by_import_path(monkeypatch) -> None:
+    import sys
+    import types
+
+    from boundary_pinn.models import _activation
+
+    module = types.ModuleType("test_user_activation")
+
+    class Indicator(torch.nn.Module):
+        def forward(self, values):
+            return (values > 0).to(values.dtype)
+
+    module.Indicator = Indicator
+    monkeypatch.setitem(sys.modules, "test_user_activation", module)
+    activation = _activation("test_user_activation.Indicator")
+    values = torch.tensor([-1.0, 0.0, 1.0])
+    expected = torch.tensor([0.0, 0.0, 1.0])
+    assert torch.equal(activation(values), expected)
+
+
+@pytest.mark.parametrize(
+    ("activation", "kwargs", "expected_type"),
+    [
+        ("CELU", {"alpha": 0.5}, torch.nn.CELU),
+        ("PReLU", {"num_parameters": 1, "init": 0.25}, torch.nn.PReLU),
+        ("Softplus", {"beta": 2.0, "threshold": 12.0}, torch.nn.Softplus),
+    ],
+)
+def test_torch_nn_activation_modules_accept_constructor_kwargs(
+    activation, kwargs, expected_type
+) -> None:
+    from boundary_pinn.problems.committor.training import _initialize_mlp
+
+    network = _initialize_mlp(
+        {
+            "width": 8,
+            "depth": 2,
+            "activation": activation,
+            "activation_kwargs": kwargs,
+            "initialization": "xavier_normal",
+        },
+        input_dim=4,
+    )
+    activation_layers = [
+        module for module in network.modules() if isinstance(module, expected_type)
+    ]
+    assert len(activation_layers) == 2
+    assert torch.isfinite(network(torch.randn(5, 4))).all()
+    if activation == "PReLU":
+        assert torch.allclose(activation_layers[0].weight, torch.tensor([0.25]))
 
 
 def test_periodic_geometry_is_invariant_under_integer_shifts() -> None:
