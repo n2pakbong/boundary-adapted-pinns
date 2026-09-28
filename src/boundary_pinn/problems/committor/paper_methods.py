@@ -13,7 +13,11 @@ import time
 import numpy as np
 import torch
 
-from .periodic_two_well import PeriodicTwoWellCommittor
+from .periodic_two_well import (
+    InteriorSampler,
+    PeriodicTwoWellCommittor,
+    sample_interior_points,
+)
 
 
 @dataclass(frozen=True)
@@ -45,12 +49,13 @@ def generate_committor_mc_data(
     seed: int,
     minimum_resolved_fraction: float = 0.9,
     anchor_points: list[list[float]] | None = None,
+    interior_sampler: InteriorSampler | None = None,
     progress_interval_fraction: float = 0.01,
     progress_interval_seconds: float = 10.0,
 ) -> CommittorMonteCarloData:
     """Estimate committor values by capped, vectorized Euler--Maruyama paths.
 
-    Paths start at common uniform-in-domain anchors and evolve as
+    Paths start at common interior anchors and evolve as
     ``X[n+1] = X[n] - grad(V(X[n])) dt + sqrt(2 epsilon dt) Z[n] (mod 1)``.
     A path is labelled one if it enters B before A, and zero if it enters A
     first.  The function fails if any anchor has too many paths unresolved at
@@ -68,10 +73,19 @@ def generate_committor_mc_data(
 
     if anchor_points is None:
         anchor_generator = torch.Generator(device="cpu").manual_seed(int(seed))
-        anchors = problem.sample_interior(
-            n_anchors, device="cpu", dtype=torch.float64, generator=anchor_generator
+        anchors = sample_interior_points(
+            problem,
+            n_anchors,
+            device="cpu",
+            dtype=torch.float64,
+            generator=anchor_generator,
+            sampler=interior_sampler,
         ).numpy()
-        anchor_source = "uniform_rejection_from_domain"
+        anchor_source = (
+            "uniform_rejection_from_domain"
+            if interior_sampler is None
+            else f"custom:{interior_sampler.__module__}.{interior_sampler.__qualname__}"
+        )
     else:
         anchors = np.asarray(anchor_points, dtype=np.float64)
         if anchors.shape != (n_anchors, 2):

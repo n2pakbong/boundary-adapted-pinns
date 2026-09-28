@@ -6,6 +6,7 @@ import json
 import platform
 import random
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -21,14 +22,29 @@ from .paper_methods import (
     estimate_domain_area,
     generate_committor_mc_data,
     nitsche_committor_losses,
+    sample_boundary_geometry,
 )
-from .periodic_two_well import PeriodicTwoWellCommittor
+from .periodic_two_well import (
+    InteriorSampler,
+    PeriodicTwoWellCommittor,
+    sample_interior_points,
+)
 
 PAPER_METHODS = (
     "simple_pinn", "boundary_adapted", "over_enforced", "under_enforced",
     "variational_nitsche",
 )
 LEGACY_METHODS = ("naive_product", "penalty")
+
+ModelFactory = Callable[[], torch.nn.Module]
+OptimizerFactory = Callable[[list[torch.nn.Parameter]], torch.optim.Optimizer]
+SchedulerFactory = Callable[[torch.optim.Optimizer], Any]
+
+
+def _callable_name(function: Callable[..., Any] | None, default: str) -> str:
+    if function is None:
+        return default
+    return f"{function.__module__}.{function.__qualname__}"
 
 @dataclass(frozen=True)
 class PeriodicCommittorConfig:
@@ -116,23 +132,55 @@ def _initialize_mlp(model_config: dict[str, Any], *, input_dim: int = 2) -> MLP:
     return base
 
 
+class _ScalarOutput(nn.Module):
+    """Adapt a one-value-per-row PyTorch model to the scalar PINN interface."""
+
+    def __init__(self, network: nn.Module):
+        super().__init__()
+        self.network = network
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        values = self.network(x)
+        if not isinstance(values, torch.Tensor):
+            raise TypeError("the model must return a torch.Tensor")
+        if values.numel() != x.shape[0]:
+            raise ValueError(
+                "the model must return exactly one scalar for each input row"
+            )
+        return values.reshape(x.shape[0])
+
+
 def _build_periodic_committor_model(
-    config: PeriodicCommittorConfig, problem: PeriodicTwoWellCommittor
+    config: PeriodicCommittorConfig,
+    problem: PeriodicTwoWellCommittor,
+    model_factory: ModelFactory | None = None,
 ) -> torch.nn.Module:
-    architecture = str(config.model.get("architecture", "periodic_mlp")).lower()
-    if architecture == "periodic_mlp":
-        frequencies = (1.0,)
-    elif architecture == "periodic_fourier_mlp":
-        frequencies = tuple(float(value) for value in config.model.get("frequencies", (1, 2, 4)))
-    else:
-        raise ValueError(
-            f"Unknown committor architecture {architecture!r}; choose "
-            "'periodic_mlp' or 'periodic_fourier_mlp'."
+    """Build a built-in periodic MLP or a user-defined PyTorch model."""
+    if model_factory is None:
+        architecture = str(config.model.get("architecture", "periodic_mlp")).lower()
+        if architecture == "periodic_mlp":
+            frequencies = (1.0,)
+        elif architecture == "periodic_fourier_mlp":
+            frequencies = tuple(
+                float(value) for value in config.model.get("frequencies", (1, 2, 4))
+            )
+        else:
+            raise ValueError(
+                f"Unknown committor architecture {architecture!r}; choose "
+                "'periodic_mlp' or 'periodic_fourier_mlp'."
+            )
+        base = PeriodicMLP(
+            _initialize_mlp(config.model, input_dim=4 * len(frequencies)),
+            frequencies=frequencies,
         )
-    base = PeriodicMLP(
-        _initialize_mlp(config.model, input_dim=4 * len(frequencies)),
-        frequencies=frequencies,
-    )
+    else:
+        base = model_factory()
+        if not isinstance(base, torch.nn.Module):
+            raise TypeError("model_factory must return a torch.nn.Module")
+        # Boundary wrappers expect one scalar per input point. Accept the
+        # common [batch, 1] output shape from user-written modules as well.
+        base = _ScalarOutput(base)
+
     if config.method in ("simple_pinn", "penalty"):
         return base
     if config.method == "boundary_adapted":
@@ -254,12 +302,34 @@ def _format_duration(seconds: float) -> str:
     return f"{secs:d}s"
 
 
+def _boundary_mse(
+    model: torch.nn.Module,
+    problem: PeriodicTwoWellCommittor,
+    which: str,
+    target_value: float,
+    n: int,
+    *,
+    device: torch.device,
+    dtype: torch.dtype,
+) -> torch.Tensor:
+    """Monte Carlo boundary MSE with arclength quadrature weights."""
+    points, _, weights = sample_boundary_geometry(
+        problem, which, n, device=device, dtype=dtype
+    )
+    squared_error = (model(points) - target_value).square()
+    return (weights * squared_error).sum() / weights.sum()
+
+
 def run_periodic_committor(
     config: PeriodicCommittorConfig,
     run_dir: Path,
     *,
     resume: bool = False,
     mc_data: CommittorMonteCarloData | None = None,
+    model_factory: ModelFactory | None = None,
+    interior_sampler: InteriorSampler | None = None,
+    optimizer_factory: OptimizerFactory | None = None,
+    scheduler_factory: SchedulerFactory | None = None,
 ) -> dict[str, Any]:
     """Run or resume one periodic committor method comparison.
 
@@ -284,13 +354,28 @@ def run_periodic_committor(
         else "paper_methods_v1" if uses_paper_objective else "legacy_pilot_v1"
     )
     metadata_path = run_dir / "metadata.json"
+    runtime_hooks = {
+        "model": _callable_name(model_factory, "repository model builder"),
+        "interior_sampler": _callable_name(
+            interior_sampler, "uniform rejection on the punctured torus"
+        ),
+        "optimizer": _callable_name(optimizer_factory, "repository optimizer builder"),
+        "scheduler": _callable_name(scheduler_factory, "repository scheduler builder"),
+    }
     if resume and metadata_path.exists():
-        prior_version = json.loads(metadata_path.read_text(encoding="utf-8")).get("objective_version")
+        prior_metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        prior_version = prior_metadata.get("objective_version")
         if prior_version != objective_version:
             raise RuntimeError(
                 "This checkpoint uses objective version "
                 f"{prior_version!r}, but the selected method now uses {objective_version!r}. "
                 "Start a new run folder; the old checkpoint was not resumed."
+            )
+        if prior_metadata.get("runtime_hooks", runtime_hooks) != runtime_hooks:
+            raise RuntimeError(
+                "The model, sampler, optimizer, or scheduler used for this resume "
+                "does not match the saved run. Restore the original notebook code "
+                "or start a new output folder."
             )
     mc_data = _load_or_generate_mc_data(config, problem, run_dir, mc_data)
     if uses_paper_objective and mc_data is None:
@@ -313,11 +398,12 @@ def run_periodic_committor(
             "cuda_available": torch.cuda.is_available(),
             "device": str(requested_device),
             "objective_version": objective_version,
+            "runtime_hooks": runtime_hooks,
         })
     elif not config_path.exists():
         raise FileNotFoundError(f"Cannot resume: {config_path} is missing.")
 
-    model = _build_periodic_committor_model(config, problem).to(
+    model = _build_periodic_committor_model(config, problem, model_factory).to(
         device=requested_device, dtype=dtype
     )
     scale_names = {
@@ -343,8 +429,22 @@ def run_periodic_committor(
     parameters = list(model.parameters())
     if loss_scales is not None:
         parameters.extend(loss_scales.parameters())
-    optimizer = _build_optimizer(parameters, config.training)
-    scheduler = _build_scheduler(optimizer, config.training)
+    optimizer = (
+        optimizer_factory(parameters)
+        if optimizer_factory is not None
+        else _build_optimizer(parameters, config.training)
+    )
+    if not isinstance(optimizer, torch.optim.Optimizer):
+        raise TypeError("optimizer_factory must return a torch.optim.Optimizer")
+    scheduler = (
+        scheduler_factory(optimizer)
+        if scheduler_factory is not None
+        else _build_scheduler(optimizer, config.training)
+    )
+    if not all(hasattr(scheduler, name) for name in ("step", "state_dict", "load_state_dict")):
+        raise TypeError(
+            "scheduler_factory must return an object with step, state_dict, and load_state_dict"
+        )
 
     start_epoch, best_loss, best_epoch = 1, float("inf"), 0
     best_model_state: dict[str, torch.Tensor] | None = None
@@ -400,11 +500,19 @@ def run_periodic_committor(
             diagnostics: dict[str, torch.Tensor] = {}
             if uses_paper_objective and config.method == "variational_nitsche":
                 weak = config.training["nitsche"]
-                volume_points = problem.sample_interior(
-                    int(weak["volume_points"]), device=requested_device, dtype=dtype
+                volume_points = sample_interior_points(
+                    problem,
+                    int(weak["volume_points"]),
+                    device=requested_device,
+                    dtype=dtype,
+                    sampler=interior_sampler,
                 )
-                test_centers = problem.sample_interior(
-                    int(weak["test_functions"]), device=requested_device, dtype=dtype
+                test_centers = sample_interior_points(
+                    problem,
+                    int(weak["test_functions"]),
+                    device=requested_device,
+                    dtype=dtype,
+                    sampler=interior_sampler,
                 )
                 _, weak_losses = nitsche_committor_losses(
                     model,
@@ -424,8 +532,12 @@ def run_periodic_committor(
                 })
                 losses["data_loss"] = (model(mc_x) - mc_y).square().mean()
             else:
-                x = problem.sample_interior(
-                    collocation_points, device=requested_device, dtype=dtype
+                x = sample_interior_points(
+                    problem,
+                    collocation_points,
+                    device=requested_device,
+                    dtype=dtype,
+                    sampler=interior_sampler,
                 )
                 residual = problem.residual(model, x)
                 pde_loss = residual.square().mean()
@@ -433,28 +545,28 @@ def run_periodic_committor(
                     losses["pde_loss"] = pde_loss
                     losses["data_loss"] = (model(mc_x) - mc_y).square().mean()
                     if config.method == "simple_pinn":
-                        source_boundary = problem.sample_boundary(
-                            "source", boundary_points, device=requested_device, dtype=dtype
-                        )
-                        target_boundary = problem.sample_boundary(
-                            "target", boundary_points, device=requested_device, dtype=dtype
-                        )
                         losses["boundary_loss"] = (
-                            model(source_boundary).square().mean()
-                            + (model(target_boundary) - 1.0).square().mean()
+                            _boundary_mse(
+                                model, problem, "source", 0.0, boundary_points,
+                                device=requested_device, dtype=dtype,
+                            )
+                            + _boundary_mse(
+                                model, problem, "target", 1.0, boundary_points,
+                                device=requested_device, dtype=dtype,
+                            )
                         )
                 else:
                     boundary_loss = torch.zeros((), device=requested_device, dtype=dtype)
                     if config.method in ("penalty", "simple_pinn"):
-                        source_boundary = problem.sample_boundary(
-                            "source", boundary_points, device=requested_device, dtype=dtype
-                        )
-                        target_boundary = problem.sample_boundary(
-                            "target", boundary_points, device=requested_device, dtype=dtype
-                        )
                         boundary_loss = (
-                            model(source_boundary).square().mean()
-                            + (model(target_boundary) - 1.0).square().mean()
+                            _boundary_mse(
+                                model, problem, "source", 0.0, boundary_points,
+                                device=requested_device, dtype=dtype,
+                            )
+                            + _boundary_mse(
+                                model, problem, "target", 1.0, boundary_points,
+                                device=requested_device, dtype=dtype,
+                            )
                         )
                     losses["pde_loss"] = pde_loss
                     losses["boundary_loss"] = boundary_loss

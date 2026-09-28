@@ -6,6 +6,7 @@ import argparse
 import json
 import subprocess
 import time
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -29,13 +30,18 @@ from ....problems.committor.reference import (
 from ....problems.committor.paper_methods import (
     CommittorMonteCarloData,
     generate_committor_mc_data,
+    sample_boundary_geometry,
 )
+from ....problems.committor.periodic_two_well import InteriorSampler
 from ....problems.committor.training import (
     PAPER_METHODS,
     PeriodicCommittorConfig,
     _build_periodic_committor_model,
     _dtype,
+    ModelFactory,
+    OptimizerFactory,
     run_periodic_committor,
+    SchedulerFactory,
 )
 
 
@@ -53,6 +59,12 @@ def _git_revision() -> str | None:
         ).strip()
     except (OSError, subprocess.CalledProcessError):
         return None
+
+
+def _hook_name(function: Callable[..., Any] | None, default: str) -> str:
+    if function is None:
+        return default
+    return f"{function.__module__}.{function.__qualname__}"
 
 
 def _read_metrics(path: Path) -> list[dict[str, Any]]:
@@ -117,17 +129,27 @@ def _boundary_rmse(
     generator = torch.Generator(device="cpu").manual_seed(0)
     model.eval()
     with torch.no_grad():
-        source = problem.sample_boundary(
-            "source", points_per_boundary, device="cpu", dtype=dtype, generator=generator
-        ).to(device)
-        target = problem.sample_boundary(
-            "target", points_per_boundary, device="cpu", dtype=dtype, generator=generator
-        ).to(device)
+        source, _, source_weights = sample_boundary_geometry(
+            problem, "source", points_per_boundary, device=torch.device("cpu"),
+            dtype=dtype, generator=generator,
+        )
+        target, _, target_weights = sample_boundary_geometry(
+            problem, "target", points_per_boundary, device=torch.device("cpu"),
+            dtype=dtype, generator=generator,
+        )
+        source = source.to(device)
+        target = target.to(device)
+        source_weights = source_weights.to(device)
+        target_weights = target_weights.to(device)
         source_error = model(source)
         target_error = model(target) - 1.0
         return {
-            "source_boundary_rmse": float(source_error.square().mean().sqrt().cpu()),
-            "target_boundary_rmse": float(target_error.square().mean().sqrt().cpu()),
+            "source_boundary_rmse": float(
+                ((source_weights * source_error.square()).sum() / source_weights.sum()).sqrt().cpu()
+            ),
+            "target_boundary_rmse": float(
+                ((target_weights * target_error.square()).sum() / target_weights.sum()).sqrt().cpu()
+            ),
         }
 
 
@@ -335,7 +357,10 @@ def _load_monte_carlo_labels(output_dir: Path) -> CommittorMonteCarloData:
 
 
 def _prepare_cpu_artifacts(
-    raw: dict[str, Any], output_dir: Path
+    raw: dict[str, Any],
+    output_dir: Path,
+    *,
+    interior_sampler: InteriorSampler | None = None,
 ) -> tuple[PeriodicCommittorReference, dict[str, float | None], CommittorMonteCarloData | None]:
     """Compute and save the CPU-only reference and shared Monte Carlo labels."""
     problem = PeriodicTwoWellCommittor(**raw["problem"])
@@ -355,7 +380,9 @@ def _prepare_cpu_artifacts(
             f"required resolved fraction={mc_settings.get('minimum_resolved_fraction', 0.9):.0%}.",
             flush=True,
         )
-        shared_mc_data = generate_committor_mc_data(problem, **mc_settings)
+        shared_mc_data = generate_committor_mc_data(
+            problem, **mc_settings, interior_sampler=interior_sampler
+        )
         np.savez_compressed(
             output_dir / "monte_carlo_labels.npz",
             anchors=shared_mc_data.anchors.numpy(),
@@ -380,13 +407,19 @@ def _prepare_cpu_artifacts(
         "monte_carlo_metadata_file": "monte_carlo_labels.json" if shared_mc_data is not None else None,
         "monte_carlo_plot_file": "monte_carlo_anchors.png" if shared_mc_data is not None else None,
         "config_file": "comparison_config.json",
+        "interior_sampler": _hook_name(
+            interior_sampler, "uniform rejection on the punctured torus"
+        ),
     })
     print(f"CPU preparation complete: {output_dir}", flush=True)
     return reference, fd_diagnostics, shared_mc_data
 
 
 def _load_cpu_preparation(
-    raw: dict[str, Any], output_dir: Path
+    raw: dict[str, Any],
+    output_dir: Path,
+    *,
+    interior_sampler: InteriorSampler | None = None,
 ) -> tuple[PeriodicCommittorReference, dict[str, float | None], CommittorMonteCarloData | None]:
     """Load the finished CPU artifacts and reject incomplete or mismatched runs."""
     preparation_path = output_dir / "cpu_preparation.json"
@@ -396,6 +429,17 @@ def _load_cpu_preparation(
             "Run the CPU preparation stage first."
         )
     preparation = json.loads(preparation_path.read_text(encoding="utf-8"))
+    expected_sampler = _hook_name(
+        interior_sampler, "uniform rejection on the punctured torus"
+    )
+    saved_sampler = preparation.get(
+        "interior_sampler", "uniform rejection on the punctured torus"
+    )
+    if saved_sampler != expected_sampler:
+        raise ValueError(
+            "The prepared Monte Carlo anchors used a different interior sampler. "
+            "Restore the sampling function from the preparation notebook or prepare a new run."
+        )
     prepared_revision = preparation.get("preparation_git_revision")
     active_revision = _git_revision()
     if prepared_revision and active_revision and prepared_revision != active_revision:
@@ -457,7 +501,7 @@ def _validate_comparison_config(raw: dict[str, Any]) -> None:
         },
         "top-level",
     )
-    for required in ("seed", "device", "dtype", "methods", "problem", "model", "training"):
+    for required in ("seed", "device", "dtype", "methods", "problem", "training"):
         if required not in raw:
             raise ValueError(f"Missing required comparison setting: {required}")
     if raw["dtype"] not in {"float32", "float64"}:
@@ -479,45 +523,46 @@ def _validate_comparison_config(raw: dict[str, Any]) -> None:
         {"a", "b", "epsilon", "source_center", "target_center", "set_radius"},
         "problem",
     )
-    model = require_mapping(raw["model"], "model")
-    reject_unknown(
-        model,
-        {
-            "architecture", "frequencies", "width", "depth", "activation",
-            "activation_kwargs", "initialization", "gain",
-        },
-        "model",
-    )
-    architecture = str(model.get("architecture", "periodic_mlp")).lower()
-    if architecture not in {"periodic_mlp", "periodic_fourier_mlp"}:
-        raise ValueError("model.architecture must be 'periodic_mlp' or 'periodic_fourier_mlp'")
-    for key in ("width", "depth"):
-        value = float(model.get(key, 0))
-        if value < 1 or not value.is_integer():
-            raise ValueError(f"model.{key} must be a positive integer")
-    activation_name = str(model.get("activation", "tanh"))
-    try:
-        activation = _activation(activation_name, model.get("activation_kwargs"))
-        with torch.no_grad():
-            activation.eval()(torch.zeros((2, int(model.get("width", 1)))))
-    except Exception as error:
-        raise ValueError(
-            f"Could not construct or apply model.activation {activation_name!r}: {error}"
-        ) from error
-    if str(model.get("initialization", "xavier_normal")).lower() not in {
-        "xavier_normal", "xavier_uniform",
-    }:
-        raise ValueError("model.initialization must be xavier_normal or xavier_uniform")
-    if "gain" in model and float(model["gain"]) <= 0:
-        raise ValueError("model.gain must be positive")
-    if architecture == "periodic_fourier_mlp":
-        frequencies = model.get("frequencies", [1, 2, 4])
-        if not isinstance(frequencies, (list, tuple)) or not frequencies or any(
-            float(value) < 1 or not float(value).is_integer() for value in frequencies
-        ):
-            raise ValueError("model.frequencies must be a nonempty list of positive integers")
-    elif "frequencies" in model:
-        raise ValueError("model.frequencies is only used with periodic_fourier_mlp")
+    if "model" in raw:
+        model = require_mapping(raw["model"], "model")
+        reject_unknown(
+            model,
+            {
+                "architecture", "frequencies", "width", "depth", "activation",
+                "activation_kwargs", "initialization", "gain",
+            },
+            "model",
+        )
+        architecture = str(model.get("architecture", "periodic_mlp")).lower()
+        if architecture not in {"periodic_mlp", "periodic_fourier_mlp"}:
+            raise ValueError("model.architecture must be 'periodic_mlp' or 'periodic_fourier_mlp'")
+        for key in ("width", "depth"):
+            value = float(model.get(key, 0))
+            if value < 1 or not value.is_integer():
+                raise ValueError(f"model.{key} must be a positive integer")
+        activation_name = str(model.get("activation", "tanh"))
+        try:
+            activation = _activation(activation_name, model.get("activation_kwargs"))
+            with torch.no_grad():
+                activation.eval()(torch.zeros((2, int(model.get("width", 1)))))
+        except Exception as error:
+            raise ValueError(
+                f"Could not construct or apply model.activation {activation_name!r}: {error}"
+            ) from error
+        if str(model.get("initialization", "xavier_normal")).lower() not in {
+            "xavier_normal", "xavier_uniform",
+        }:
+            raise ValueError("model.initialization must be xavier_normal or xavier_uniform")
+        if "gain" in model and float(model["gain"]) <= 0:
+            raise ValueError("model.gain must be positive")
+        if architecture == "periodic_fourier_mlp":
+            frequencies = model.get("frequencies", [1, 2, 4])
+            if not isinstance(frequencies, (list, tuple)) or not frequencies or any(
+                float(value) < 1 or not float(value).is_integer() for value in frequencies
+            ):
+                raise ValueError("model.frequencies must be a nonempty list of positive integers")
+        elif "frequencies" in model:
+            raise ValueError("model.frequencies is only used with periodic_fourier_mlp")
 
     training = require_mapping(raw["training"], "training")
     reject_unknown(
@@ -669,6 +714,10 @@ def run_periodic_comparison(
     resume: bool = False,
     prepare_only: bool = False,
     train_prepared: bool = False,
+    model_factory: ModelFactory | None = None,
+    interior_sampler: InteriorSampler | None = None,
+    optimizer_factory: OptimizerFactory | None = None,
+    scheduler_factory: SchedulerFactory | None = None,
 ) -> None:
     """Prepare numerical references and run the configured neural comparisons.
 
@@ -691,6 +740,11 @@ def run_periodic_comparison(
         raise ValueError(
             "A CUDA-configured comparison must be split into CPU preparation and GPU training. "
             "Run --prepare-cpu-only first, then use --train-prepared (and --resume if needed)."
+        )
+    if not prepare_only and model_factory is None and "model" not in raw:
+        raise ValueError(
+            "This run has no model configuration. Pass model_factory=your_function "
+            "from Python, or add a model section for the built-in command-line model."
         )
     preparation_path = output_dir / "cpu_preparation.json"
     if output_dir.exists() and not (resume or train_prepared) and any(
@@ -736,7 +790,7 @@ def run_periodic_comparison(
                 f"{output_dir} already has comparison metadata; choose a new run directory for CPU preparation."
             )
         write_json(metadata_path, metadata)
-        _prepare_cpu_artifacts(raw, output_dir)
+        _prepare_cpu_artifacts(raw, output_dir, interior_sampler=interior_sampler)
         print(
             "No neural network was trained. The CPU reference and Monte Carlo labels are ready "
             "for the separate GPU training stage.",
@@ -745,9 +799,13 @@ def run_periodic_comparison(
         return
 
     if train_prepared or (resume and preparation_path.is_file()):
-        reference, fd_diagnostics, shared_mc_data = _load_cpu_preparation(raw, output_dir)
+        reference, fd_diagnostics, shared_mc_data = _load_cpu_preparation(
+            raw, output_dir, interior_sampler=interior_sampler
+        )
     else:
-        reference, fd_diagnostics, shared_mc_data = _prepare_cpu_artifacts(raw, output_dir)
+        reference, fd_diagnostics, shared_mc_data = _prepare_cpu_artifacts(
+            raw, output_dir, interior_sampler=interior_sampler
+        )
 
     problem = PeriodicTwoWellCommittor(**raw["problem"])
     grid_sizes = [int(size) for size in raw["reference_grid_sizes"]]
@@ -756,6 +814,14 @@ def run_periodic_comparison(
         raise RuntimeError("The comparison configuration requests CUDA but no CUDA device is available.")
     revision = _git_revision()
     metadata["training_git_revision"] = revision
+    metadata["runtime_hooks"] = {
+        "model": _hook_name(model_factory, "repository model builder"),
+        "interior_sampler": _hook_name(
+            interior_sampler, "uniform rejection on the punctured torus"
+        ),
+        "optimizer": _hook_name(optimizer_factory, "repository optimizer builder"),
+        "scheduler": _hook_name(scheduler_factory, "repository scheduler builder"),
+    }
     metadata.setdefault("training_started_utc", now)
     metadata["git_revision"] = revision
     if resume:
@@ -785,15 +851,24 @@ def run_periodic_comparison(
             dtype=str(raw["dtype"]),
             method=method,
             problem=raw["problem"],
-            model=raw["model"],
+            model=raw.get("model", {}),
             training=raw["training"],
         )
         method_resume = resume and (run_directory / "last.pt").exists()
         print(f"Starting {method} ({config.training['epochs']} epochs).", flush=True)
         final_training_metrics = run_periodic_committor(
-            config, run_directory, resume=method_resume, mc_data=shared_mc_data
+            config,
+            run_directory,
+            resume=method_resume,
+            mc_data=shared_mc_data,
+            model_factory=model_factory,
+            interior_sampler=interior_sampler,
+            optimizer_factory=optimizer_factory,
+            scheduler_factory=scheduler_factory,
         )
-        model = _build_periodic_committor_model(config, problem).to(device=requested_device, dtype=dtype)
+        model = _build_periodic_committor_model(
+            config, problem, model_factory
+        ).to(device=requested_device, dtype=dtype)
         checkpoint = torch.load(run_directory / "best.pt", map_location=requested_device, weights_only=False)
         model.load_state_dict(checkpoint["model_state"])
         prediction = _evaluate(model, reference, device=requested_device, dtype=dtype, batch_size=batch_size)
@@ -816,7 +891,10 @@ def run_periodic_comparison(
 
 
 def evaluate_saved_models(
-    output_dir: Path, *, training_git_revision: str | None = None
+    output_dir: Path,
+    *,
+    training_git_revision: str | None = None,
+    model_factory: ModelFactory | None = None,
 ) -> Path:
     """Evaluate existing best checkpoints against the saved FDM reference on CPU.
 
@@ -828,6 +906,11 @@ def evaluate_saved_models(
         raise FileNotFoundError(f"Missing comparison_config.json in {output_dir}")
     raw = json.loads(config_path.read_text(encoding="utf-8"))
     _validate_comparison_config(raw)
+    if model_factory is None and "model" not in raw:
+        raise ValueError(
+            "This run used a Python model_factory. Re-run the notebook's model cell "
+            "and pass that same function to evaluate_saved_models(..., model_factory=...)."
+        )
     grid_sizes = [int(size) for size in raw["reference_grid_sizes"]]
     reference_path = output_dir / f"reference_fd_{max(grid_sizes)}.npz"
     if not reference_path.is_file():
@@ -858,10 +941,12 @@ def evaluate_saved_models(
             dtype=str(raw["dtype"]),
             method=method,
             problem=raw["problem"],
-            model=raw["model"],
+            model=raw.get("model", {}),
             training=raw["training"],
         )
-        model = _build_periodic_committor_model(config, problem).to(device=device, dtype=dtype)
+        model = _build_periodic_committor_model(
+            config, problem, model_factory
+        ).to(device=device, dtype=dtype)
         checkpoint_path = output_dir / method / "best.pt"
         if not checkpoint_path.is_file():
             raise FileNotFoundError(f"Missing best checkpoint for {method}: {checkpoint_path}")

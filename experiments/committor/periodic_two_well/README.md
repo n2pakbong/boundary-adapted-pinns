@@ -61,7 +61,15 @@ $$
 q_\theta(x)=g(x)+\rho(x)^\alpha N_\theta(x).
 $$
 
-The exponent $\alpha$ defines three distinct members of that family: boundary-adapted $(\alpha=1)$, over-enforced $(\alpha=3/2)$, and under-enforced $(\alpha=1/2)$. All three satisfy both boundary values by construction. None has a separate boundary-residual loss. The periodic network $N_\theta$ receives sine/cosine coordinates, so its output is periodic.
+The exponent $\alpha$ defines three distinct members of that family: boundary-adapted $(\alpha=1)$, over-enforced $(\alpha=3/2)$, and under-enforced $(\alpha=1/2)$. All three satisfy both boundary values by construction. None has a separate boundary-residual loss.
+
+### Network architecture and its relation to the paper
+
+The Colab example defines its model as a normal `torch.nn.Module`. By default it maps $(x_1,x_2)$ to $(\sin(2\pi x_1),\sin(2\pi x_2),\cos(2\pi x_1),\cos(2\pi x_2))$, then applies a fully connected MLP with width 64, four hidden layers, `nn.Tanh()`, and a linear scalar output. This fixed input map makes the output periodic; the layer sequence is printed in the notebook.
+
+Edit the `nn.Module` class directly to change layers, activations, or initialization. `nn.Linear` starts with PyTorch's default initialization. The runner accepts the class as its model factory; the model takes an `[n, 2]` coordinate tensor and returns one scalar per row. Keep the sine/cosine feature map or use another periodic architecture to preserve periodicity. The sampler, optimizer, and scheduler are also ordinary editable Python code.
+
+The periodic committor is an additional example, not one of the paper's reported experiments. The paper describes the boundary-adapted ansatz and compares variants on Euclidean mean-escape-time problems; it does not use a torus or periodic coordinate features. Its OU experiment uses tanh with width 30 and two hidden layers; its double-well experiment uses tanh with width 30 and three hidden layers ([Tepakbong et al., 2026, Sec. 4](https://arxiv.org/abs/2607.19167)). The committor example adapts the methods to periodic coordinates and uses different default network dimensions.
 
 ## Methods and exact objectives
 
@@ -83,12 +91,14 @@ The five methods are:
 | `under_enforced` | $q_\theta=g+\rho^{1/2}N_\theta$ | $\widehat J_{\rm pde},\widehat J_{\rm data}$ | Both values exact; no boundary penalty. |
 | `variational_nitsche` | $q_\theta=N_\theta$ | $\widehat J_{\rm pde},\widehat J_{\rm bc},\widehat J_{\rm data}$ | Weak imposition with Nitsche consistency, symmetry, and stabilization terms. |
 
-For the standard PINN only,
+For the standard PINN only, the boundary points are drawn at uniform radial angles. If $w_i$ is the local arclength weight returned by the boundary quadrature, its boundary loss is
 
 $$
-\widehat J_{\rm bc}=\frac1{N_A}\sum_i q_\theta(x_i^A)^2+
-\frac1{N_B}\sum_i(q_\theta(x_i^B)-1)^2.
+\widehat J_{\rm bc}=\frac{\sum_i w_i^A q_\theta(x_i^A)^2}{\sum_i w_i^A}
++\frac{\sum_i w_i^B(q_\theta(x_i^B)-1)^2}{\sum_i w_i^B}.
 $$
+
+The weights convert uniform-angle samples into an arclength average; without them the boundary integral would be sampled with a geometry-dependent angular bias. Nitsche uses the same arclength quadrature weights.
 
 This boundary-residual penalty is part of the ordinary unconstrained PINN. It is not applied to the three exact-boundary representations. The variational method has a different boundary stabilization term, described below; it is part of Nitsche's weak boundary treatment, not a penalty added to a boundary-adapted ansatz.
 
@@ -185,44 +195,43 @@ These files implement this committor example; the notebook calls the version-con
 
 ## Accuracy against the finite-difference reference
 
-Training losses describe optimization. Solution accuracy is reported separately against the finest configured finite-difference approximation. `summary.json` and CPU-only `saved_model_evaluation.json` give absolute and relative grid estimates of $L^2$, full $H^1$, the $H^1$ seminorm, full $H^2$, and the $H^2$ seminorm. Boundary RMSE is evaluated on actual level-set points. The 128-to-256 reference-grid comparison estimates grid sensitivity; it is not an error bound.
+Training losses describe optimization. Solution accuracy is reported separately against the finest configured finite-difference approximation. `summary.json` and CPU-only `saved_model_evaluation.json` give absolute and relative grid estimates of $L^2$, full $H^1$, the $H^1$ seminorm, full $H^2$, and the $H^2$ seminorm. Boundary RMSE uses actual level-set points with arclength quadrature weights. The 128-to-256 reference-grid comparison estimates grid sensitivity; it is not an error bound.
 
 The notebook displays the Sobolev error table and the final training-loss table. `losses.png` and per-method `metrics.jsonl` preserve training progress and curves; these are diagnostics, not substitutes for solution errors or publication figures.
 
-## Choosing and changing experiment settings
+## Change and reuse the experiment
 
-The values used for the successful five-method pilot are in [`gpu_pilot.json`](configs/gpu_pilot.json). A field-by-field guide, including the Monte Carlo sample count and noise, optimizer options, initialization, reporting interval, and reference grids, is in [the configuration guide](configs/README.md).
+The versioned [`gpu_pilot.json`](configs/gpu_pilot.json) is the command-line pilot preset. The Colab notebook has a direct Python workflow: ordinary variables control counts and problem values; a visible `nn.Module` defines the model; and visible Python code defines the sampler, optimizer, and schedule. The notebook passes this code to the runner.
 
-The periodic network uses the same sine/cosine coordinate embedding and fully connected MLP across methods. The default has width 64, depth 4, `tanh`, Xavier-normal weights with gain 1, zero biases, and seed 7. Width, depth, architecture, activation, initialization, and training controls come from the run configuration. Activation can be any `torch.nn` module class or a fully qualified import path for a custom `torch.nn.Module` or unary PyTorch callable, with constructor/function arguments in `model.activation_kwargs`. `SquaredReLU` is explicitly provided and computes `max(0,x)^2`. No smoothness or derivative check restricts the user’s choice. Since the strong-form residual uses second derivatives, some PyTorch modules can produce poor or unusable training behavior.
+The default model is shown in full in the notebook. Its first `Linear` layer receives four inputs formed from sine and cosine of the two torus coordinates; the remaining layers are ordinary fully connected layers. Edit the `nn.Module` class to change the architecture and its `nn.Tanh()` calls to choose other PyTorch activations. `nn.Linear` uses PyTorch's default initialization; add any `torch.nn.init` calls you want directly in the class. Edit `make_optimizer()` and `make_scheduler()` with normal PyTorch constructors. A custom model takes an `[n, 2]` coordinate tensor and returns one scalar per row. To preserve periodic boundary conditions, it must handle periodicity itself; the provided sine/cosine map is the default.
 
-The `device` and `dtype` settings select CPU or CUDA and float32 or float64. Full CPU training avoids allocating a GPU runtime but can be substantially slower.
+The default interior sampling law is uniform rejection sampling: propose points uniformly in `[0,1)^2`, discard those inside A or B, and continue until the requested count lies in D. The same visible `sample_training_points()` function selects the PDE collocation points and Monte Carlo anchor locations. Replace its body to implement another law. Every result must remain in D. A nonuniform sampler changes the averages in the PDE and data losses unless importance weights are included. Boundary points use a separate sampler: uniform radial angles with local arclength weights. If that geometry-specific rule is changed, update the quadrature weights as well.
 
-The training preset uses Adam with learning rate 0.001 and exponential decay `gamma=0.9999` for 6,000 epochs. The 1,024 PDE collocation points are resampled each epoch. The standard PINN uses 256 fresh points on each Dirichlet boundary. The exact-boundary methods have no pointwise boundary loss. Nitsche instead uses its explicitly listed volume, test-function, and boundary-quadrature counts.
+The example's geometry remains the flat unit torus with two equal-radius periodic disks and the stated cosine potential. The scalar values, centers, and radius can be changed in the notebook; another domain, target shape, or potential requires editing the problem implementation and its sampling code. The constructor rejects overlapping or touching target sets.
 
-The committor data term uses 32 anchor points, each labelled with 256 independent paths (8,192 paths total). Finite path counts create binomial sampling noise. The time step and path cap also affect the estimator through discretization and censoring. All five methods reuse the same anchors and labels. The preparation plot shows the anchor locations, labels, and estimated standard errors before training.
+The paper's numerical results are not reproduced by this added committor example. The paper's OU and double-well experiments use width-30 tanh networks with two and three hidden layers, respectively. It does not include the periodic feature map or a committor experiment. The committor notebook uses the same boundary-enforcement methods in an added periodic example, with its own network size and training setup.
 
-In Colab, controls sit beside the explanations for the problem, methods, network, training, Monte Carlo labels, and reference solve. The final review cell assembles them automatically and prints a plain-language summary; you do not need to edit a nested dictionary or learn internal architecture names. The controls start from the successful five-method pilot values. CPU preparation saves the resolved configuration in the dated Drive run folder; after a runtime restart, training reads that saved configuration. To repeat a run exactly from a terminal, pass its `comparison_config.json` to the documented runner. The configuration guide is a reference for the saved file and command-line use, not something a Colab user needs to look up while changing controls.
+Save a copy of the notebook with your edits next to the Drive run folder. The run folder saves scalar settings and callback names, but not notebook-cell source. Evaluation and resume require the same model, sampler, optimizer, and schedule code. The command-line preset remains available for the versioned built-in model; see the [configuration guide](configs/README.md).
 
 ## Run sequence and compute used
 
-1. **Setup and tests:** install the selected repository revision and run unit tests on CPU.
-2. **CPU preflight:** run the five-method code with fixed near-boundary Monte Carlo paths, tiny networks, one epoch, and coarse references. This checks the wiring, not scientific accuracy. It writes only to temporary Colab storage.
-3. **CPU experiment preparation:** solve both finite-difference reference grids and generate the shared Feynman–Kac labels with `--prepare-cpu-only`. This is the potentially long CPU stage. Its step progress and resolution diagnostics are printed while it runs. The reference, labels, configuration, metadata, and log are saved in the experiment's dated Drive folder so the work survives a runtime restart.
-4. **Training and solution evaluation:** after CPU preparation succeeds, use `--train-prepared` with that same folder. If `device` is `cuda`, switch Colab to a GPU runtime first; if it is `cpu`, stay on CPU. This loads the saved reference and labels; it does not repeat the finite-difference solves or Monte Carlo paths.
-5. **Inspect:** read final training components, Sobolev errors, loss curves, and solution previews in the notebook.
-6. **Evaluate saved models:** recompute solution errors from saved checkpoints on CPU; this does not retrain.
+1. **Setup and tests:** install the selected repository revision and run the CPU test suite.
+2. **CPU preflight:** run the tiny packaged pipeline check with one epoch and coarse references. It does not exercise edited notebook callbacks or measure scientific accuracy. Its outputs are temporary under Colab `/content` and do not go to Drive.
+3. **Notebook code check:** smoke-test the edited model, sampler, optimizer, and scheduler before preparation.
+4. **CPU preparation:** run the notebook's Python API with the selected problem, Monte Carlo settings, and interior-sampling function. It solves the finite-difference reference grids and generates the shared Feynman–Kac labels. Live path and resolution progress appears in the notebook cell. Completed references, labels, metadata, and the anchor plot go to a dated Drive folder.
+5. **Training:** run the Python API with the same Drive folder and the model class, sampler, optimizer, and scheduler code defined above. If `device` is `cuda`, switch to a GPU runtime first; if it is `cpu`, remain on CPU. Training reports epoch, elapsed time, ETA, objective, and active raw loss components. Metrics and checkpoints are saved to Drive; CPU preparation is not repeated.
+6. **Inspect or evaluate:** read the saved metrics and plots or reevaluate saved checkpoints on CPU.
+7. **Resume:** rerun the notebook's model and callback cells, then call the resume cell with the existing run folder. Use the same source code and repository revision. The runner checks the revision and callback names, but cannot detect edits inside notebook cells; if any custom code changed, start a new run folder.
 
-CPU preparation files record the repository revision. Reuse them only with the same code revision; if the code changes, rerun CPU preparation before training. The training runner checks the saved revision and refuses mismatched preparation. Resuming a checkpoint also requires the same objective version; if the version is incompatible, use a new dated run folder rather than combining different training objectives.
+A runtime reset clears notebook variables and local files. Rerun Setup with the same branch and rerun the cells that define the custom functions before training, evaluation, or resume. The five-method pilot is a single-seed exploratory run, not a final paper result; a paper study needs multiple seeds, reference-grid and Monte Carlo convergence checks, and matched compute budgets.
 
-Changing the Colab runtime clears its variables and local files. If the saved configuration selects `cuda`, change Colab to GPU, rerun Setup with the same branch, and paste the path printed by CPU preparation into the training cell. If it selects `cpu`, stay on CPU and use that same training cell. Setup skips rerunning unit tests in the GPU runtime; the CPU tests and preflight already passed before preparation. Both paths reuse the saved preparation folder on Drive and never repeat the long CPU work. The supplied five-method preset uses CUDA and is a single-seed exploratory run, not a final paper result; a paper study requires multiple seeds, reference-grid and Monte Carlo convergence checks, and matched compute budgets.
-
-For a terminal run, use the same output directory for both stages. CPU preparation always runs on CPU; run the training command on CPU or GPU to match the configuration's `device` value:
+For a terminal run using the built-in model and the versioned pilot configuration, use the same output directory for both stages:
 
 ```bash
 RUN_DIR=runs/periodic_committor/gpu_pilot
 periodic-committor experiments/committor/periodic_two_well/configs/gpu_pilot.json \
   --output-dir "$RUN_DIR" --prepare-cpu-only
-# If device is cuda, run this command in a GPU-enabled environment; if device is cpu, keep using CPU:
+# If device is cuda, run the next command in a GPU-enabled environment; if device is cpu, keep using CPU:
 periodic-committor experiments/committor/periodic_two_well/configs/gpu_pilot.json \
   --output-dir "$RUN_DIR" --train-prepared
 ```
