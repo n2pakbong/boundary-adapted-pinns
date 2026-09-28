@@ -5,7 +5,10 @@ import torch
 
 from boundary_pinn.models import LiftedBoundaryFactorPINN, MLP, PeriodicMLP, SquaredReLU
 from boundary_pinn.problems.committor import PeriodicTwoWellCommittor
-from boundary_pinn.problems.committor.periodic_two_well import sample_interior_points
+from boundary_pinn.problems.committor.periodic_two_well import (
+    _device_request_matches,
+    sample_interior_points,
+)
 from boundary_pinn.problems.committor.reference import (
     PeriodicCommittorReference,
     periodic_reference_errors,
@@ -112,6 +115,20 @@ def test_user_interior_sampler_must_return_points_inside_the_domain() -> None:
         sample_interior_points(
             problem, 2, device="cpu", dtype=torch.float64, sampler=invalid_sampler
         )
+
+
+@pytest.mark.parametrize(
+    ("actual", "requested", "expected"),
+    [
+        (torch.device("cuda:0"), torch.device("cuda"), True),
+        (torch.device("cuda:1"), torch.device("cuda"), True),
+        (torch.device("cuda:1"), torch.device("cuda:0"), False),
+        (torch.device("cpu"), torch.device("cpu"), True),
+        (torch.device("cpu"), torch.device("cuda"), False),
+    ],
+)
+def test_unindexed_device_request_matches_current_device(actual, requested, expected) -> None:
+    assert _device_request_matches(actual, requested) is expected
 
 
 @pytest.mark.parametrize(
