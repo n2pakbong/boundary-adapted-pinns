@@ -1,5 +1,6 @@
 import numpy as np
 import math
+import json
 import pytest
 import torch
 
@@ -701,6 +702,82 @@ def test_cpu_preparation_reuse_ignores_code_revision_but_checks_schema(
         comparison._load_cpu_preparation(raw, tmp_path)
 
 
+def test_training_settings_can_change_without_repeating_cpu_preparation(
+    tmp_path, capsys
+) -> None:
+    from boundary_pinn.experiments.committor.periodic_two_well.comparison import (
+        run_periodic_comparison,
+    )
+
+    class TinyPeriodicNetwork(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.layers = torch.nn.Sequential(
+                torch.nn.Linear(4, 8), torch.nn.Tanh(), torch.nn.Linear(8, 1)
+            )
+
+        def forward(self, x):
+            phase = 2.0 * torch.pi * x
+            features = torch.cat((torch.sin(phase), torch.cos(phase)), dim=-1)
+            return self.layers(features).squeeze(-1)
+
+    config = {
+        "seed": 7,
+        "device": "cpu",
+        "dtype": "float64",
+        "methods": ["simple_pinn"],
+        "problem": {
+            "a": 1.0,
+            "b": 0.6,
+            "epsilon": 0.4,
+            "source_center": [0.25, 0.0],
+            "target_center": [0.75, 0.0],
+            "set_radius": 0.5,
+        },
+        "training": {
+            "epochs": 1,
+            "collocation_points": 8,
+            "boundary_points": 4,
+            "boundary_weight": 10.0,
+            "learning_rate": 1.0e-3,
+            "lr_gamma": 1.0,
+            "checkpoint_every": 1,
+            "log_every": 1,
+        },
+        "reference_grid_sizes": [16, 32],
+        "evaluation_batch_size": 128,
+    }
+    config_path = tmp_path / "selected.json"
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    output_dir = tmp_path / "prepared"
+
+    run_periodic_comparison(config_path, output_dir, prepare_only=True)
+    config["training"]["epochs"] = 2
+    config["training"]["collocation_points"] = 12
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    run_periodic_comparison(
+        config_path,
+        output_dir,
+        train_prepared=True,
+        model_factory=TinyPeriodicNetwork,
+    )
+
+    preparation_config = json.loads(
+        (output_dir / "preparation_config.json").read_text(encoding="utf-8")
+    )
+    training_config = json.loads(
+        (output_dir / "comparison_config.json").read_text(encoding="utf-8")
+    )
+    assert preparation_config["training"]["epochs"] == 1
+    assert training_config["training"]["epochs"] == 2
+    epochs = [
+        json.loads(line)["epoch"]
+        for line in (output_dir / "simple_pinn" / "metrics.jsonl").read_text().splitlines()
+    ]
+    assert epochs == [1, 2]
+    assert "Loaded CPU-prepared reference and shared labels" in capsys.readouterr().out
+
+
 def test_cpu_preparation_uses_no_cuda_even_when_training_config_requests_it(tmp_path, monkeypatch) -> None:
     import json
 
@@ -775,7 +852,7 @@ def test_resume_discards_metrics_after_last_checkpoint(tmp_path) -> None:
 
     path = tmp_path / "metrics.jsonl"
     path.write_text(
-        '{"epoch": 1}\\n{"epoch": 2}\\n{"epoch": 3}\\n{"partial":',
+        '{"epoch": 1}\n{"epoch": 2}\n{"epoch": 3}\n{"partial":',
         encoding="utf-8",
     )
     _truncate_metrics_to_epoch(path, checkpoint_epoch=2)
