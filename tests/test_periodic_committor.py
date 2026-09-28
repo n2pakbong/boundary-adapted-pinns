@@ -286,7 +286,9 @@ def test_periodic_comparison_cpu_smoke(tmp_path, capsys) -> None:
     assert set(summary["methods"]) == set(config["methods"])
 
 
-def test_comparison_accepts_plain_pytorch_model_sampler_optimizer_and_scheduler(tmp_path) -> None:
+def test_comparison_accepts_plain_pytorch_model_sampler_optimizer_and_scheduler(
+    tmp_path, capsys
+) -> None:
     import json
 
     from boundary_pinn.experiments.committor.periodic_two_well.comparison import (
