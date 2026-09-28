@@ -45,6 +45,9 @@ from ....problems.committor.training import (
 )
 
 
+PREPARATION_SCHEMA_VERSION = 1
+
+
 def _git_revision() -> str | None:
     """Return the checkout revision when this package is running from a Git clone."""
     repository_root = Path(__file__).resolve().parents[5]
@@ -400,6 +403,7 @@ def _prepare_cpu_artifacts(
     write_json(output_dir / "cpu_preparation.json", {
         "completed_utc": datetime.now(timezone.utc).isoformat(),
         "preparation_git_revision": _git_revision(),
+        "preparation_schema_version": PREPARATION_SCHEMA_VERSION,
         "reference_file": reference_file,
         "reference_grid_sizes": grid_sizes,
         "reference_convergence": fd_diagnostics,
@@ -440,12 +444,11 @@ def _load_cpu_preparation(
             "The prepared Monte Carlo anchors used a different interior sampler. "
             "Restore the sampling function from the preparation notebook or prepare a new run."
         )
-    prepared_revision = preparation.get("preparation_git_revision")
-    active_revision = _git_revision()
-    if prepared_revision and active_revision and prepared_revision != active_revision:
+    schema_version = preparation.get("preparation_schema_version", 1)
+    if schema_version != PREPARATION_SCHEMA_VERSION:
         raise ValueError(
-            "The CPU reference and labels were prepared with a different repository revision. "
-            "Run CPU preparation again from the currently installed branch before training."
+            "The saved CPU preparation uses an incompatible data format. "
+            "Create a new preparation folder with the installed code."
         )
     expected_reference = f"reference_fd_{max(map(int, raw['reference_grid_sizes']))}.npz"
     reference_file = output_dir / str(preparation.get("reference_file", ""))
@@ -757,6 +760,13 @@ def run_periodic_comparison(
         raise FileNotFoundError(
             f"No completed CPU preparation in {output_dir}. Run the CPU preparation stage first."
         )
+    if train_prepared and not resume:
+        existing_checkpoints = list(output_dir.glob("*/last.pt"))
+        if existing_checkpoints:
+            raise FileExistsError(
+                f"{output_dir} already contains training checkpoints. "
+                "Use the resume option to continue, or prepare a new run folder."
+            )
     output_dir.mkdir(parents=True, exist_ok=True)
 
     config_record = output_dir / "comparison_config.json"
