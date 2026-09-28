@@ -333,7 +333,7 @@ def _truncate_metrics_to_epoch(metrics_path: Path, checkpoint_epoch: int) -> Non
         if int(record.get("epoch", -1)) <= checkpoint_epoch:
             kept.append(line)
     metrics_path.write_text(
-        "".join(f"{line}\\n" for line in kept),
+        "".join(f"{line}\n" for line in kept),
         encoding="utf-8",
     )
 
