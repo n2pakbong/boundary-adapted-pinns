@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import inspect
 import json
 import subprocess
 import time
@@ -34,6 +36,7 @@ from ....problems.committor.paper_methods import (
 )
 from ....problems.committor.periodic_two_well import InteriorSampler
 from ....problems.committor.training import (
+    _callable_fingerprint,
     PAPER_METHODS,
     PeriodicCommittorConfig,
     _build_periodic_committor_model,
@@ -424,6 +427,7 @@ def _prepare_cpu_artifacts(
         "interior_sampler": _hook_name(
             interior_sampler, "uniform rejection on the punctured torus"
         ),
+        "interior_sampler_fingerprint": _callable_fingerprint(interior_sampler),
     })
     print(f"CPU preparation complete: {output_dir}", flush=True)
     return reference, fd_diagnostics, shared_mc_data
@@ -464,6 +468,15 @@ def _load_cpu_preparation(
     expected_sampler = _hook_name(
         interior_sampler, "uniform rejection on the punctured torus"
     )
+    saved_sampler_fingerprint = preparation.get("interior_sampler_fingerprint")
+    if (
+        saved_sampler_fingerprint is not None
+        and saved_sampler_fingerprint != _callable_fingerprint(interior_sampler)
+    ):
+        raise ValueError(
+            "The saved Monte Carlo anchors were generated with different sampler code. "
+            "Restore that function or create a new preparation folder."
+        )
     saved_sampler = preparation.get(
         "interior_sampler", "uniform rejection on the punctured torus"
     )
@@ -885,6 +898,12 @@ def run_periodic_comparison(
         ),
         "optimizer": _hook_name(optimizer_factory, "repository optimizer builder"),
         "scheduler": _hook_name(scheduler_factory, "repository scheduler builder"),
+    }
+    metadata["runtime_hook_fingerprints"] = {
+        "model": _callable_fingerprint(model_factory),
+        "interior_sampler": _callable_fingerprint(interior_sampler),
+        "optimizer": _callable_fingerprint(optimizer_factory),
+        "scheduler": _callable_fingerprint(scheduler_factory),
     }
     metadata.setdefault("training_started_utc", now)
     metadata["git_revision"] = revision
