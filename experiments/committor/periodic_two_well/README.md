@@ -24,7 +24,7 @@ $$
 
 with $q=0$ on $\partial A$ and $q=1$ on $\partial B$. The example therefore solves a probability problem, not a mean escape time problem. The default values are $a=1$, $b=0.6$, $\varepsilon=0.4$, and chordal radius $r=0.5$.
 
-The supported geometry is this flat unit torus with two equal-radius periodic disks. The configuration can change $a$, $b$, $\varepsilon$, the two disk centers, and their common chordal radius. The torus, disk geometry, and cosine formula for $V$ are fixed in this example; its potential minima remain near $(1/4,0)$ and $(3/4,0)$ even when set centers are changed. The problem constructor checks that the two closed disks are disjoint. Supporting another domain, boundary-set geometry, or potential requires changing the problem implementation and its samplers.
+The supported geometry is this flat unit torus with two equal-radius periodic disks. The configuration can change $a$, $b$, $\varepsilon$, the two disk centers, and their common chordal radius. The torus, disk geometry, and cosine potential formula are fixed in this example; changing disk centers does not shift the phase centers built into the potential. The problem constructor checks that the two closed disks are disjoint. Supporting another domain, boundary-set geometry, or potential requires changing the problem implementation and its samplers.
 
 ## Boundary geometry and network representations
 
@@ -43,7 +43,6 @@ $$
 $$
 provided $\nabla\omega_j\ne0$, as it is for these level sets. Thus $d_j$ agrees with signed distance to first order at its own boundary, even though it is not the exact distance away from that boundary. In the exterior domain $D$, both $d_A$ and $d_B$ are positive.
 
-
 The code uses the lift and the first-order-normalized two-boundary factor
 
 $$
@@ -55,7 +54,6 @@ $$
 For the two-boundary factor, write $F(a,b)=ab/\sqrt{a^2+b^2}$, so $\rho=F(d_A,d_B)$. On $\partial A$, disjointness gives $d_B>0$, and $\partial_aF(0,d_B)=1$, $\partial_bF(0,d_B)=0$. Hence $\nabla\rho=\nabla d_A$ and $|\nabla\rho|=1$ there. The same calculation on $\partial B$ gives $\nabla\rho=\nabla d_B$ and $|\nabla\rho|=1$. The outward normal of the exterior domain points into the removed sets, so $n_D=-\nabla d_A$ on $\partial A$ and $n_D=-\nabla d_B$ on $\partial B$; consequently $\partial_{n_D}\rho=-1$ on either boundary.
 
 A plain product $d_A d_B$ vanishes on both boundaries, but its gradient is $d_B\nabla d_A$ on $\partial A$ and $d_A\nabla d_B$ on $\partial B$. Its normal derivative is scaled by the distance to the other set. The normalized $\rho$ removes this cross-boundary scale. Let $s$ be distance measured into $D$ from either boundary. Since $\partial_{n_D}\rho=-1$, $\rho=s+O(s^2)$ there. The correction $\rho^\alpha N_\theta$ therefore behaves like $s^\alpha N_\theta$: with $\alpha=1$, its normal derivative at the boundary is finite and equals $-N_\theta$; with $\alpha>1$, its first normal derivative vanishes; with $\alpha<1$, it can be singular when $N_\theta$ is nonzero on the boundary.
-
 
 Thus $g=0$ on $\partial A$, $g=1$ on $\partial B$, and $\rho=0$ on both. The exact-boundary family is
 
