@@ -65,7 +65,7 @@ The exponent $\alpha$ defines three distinct members of that family: boundary-ad
 
 ### Network architecture and its relation to the paper
 
-The Colab example defines its model as a normal `torch.nn.Module`. By default it maps $(x_1,x_2)$ to $(\sin(2\pi x_1),\sin(2\pi x_2),\cos(2\pi x_1),\cos(2\pi x_2))$, then applies a fully connected MLP with width 64, four hidden layers, `nn.Tanh()`, and a linear scalar output. This fixed input map makes the output periodic; the layer sequence is printed in the notebook.
+The Colab example defines its model as a normal `torch.nn.Module`. By default it maps $(x_1,x_2)$ to $(\sin(2\pi x_1),\sin(2\pi x_2),\cos(2\pi x_1),\cos(2\pi x_2))$, then applies a fully connected MLP with width 64, two hidden layers, `nn.Tanh()`, and a linear scalar output. This fixed input map makes the output periodic; the layer sequence is printed in the notebook.
 
 Edit the `nn.Module` class directly to change layers, activations, or initialization. `nn.Linear` starts with PyTorch's default initialization. The runner accepts the class as its model factory; the model takes an `[n, 2]` coordinate tensor and returns one scalar per row. Keep the sine/cosine feature map or use another periodic architecture to preserve periodicity. The sampler, optimizer, and scheduler are also ordinary editable Python code.
 
@@ -215,15 +215,15 @@ Save a copy of the notebook with your edits next to the Drive run folder. The ru
 
 ## Run sequence and compute used
 
-1. **Setup and tests:** install the selected repository revision and run the CPU test suite.
-2. **CPU preflight:** run the tiny packaged pipeline check with one epoch and coarse references. It does not exercise edited notebook callbacks or measure scientific accuracy. Its outputs are temporary under Colab `/content` and do not go to Drive.
+1. **Choose the runtime and run Setup:** set `DEVICE` in the notebook, then choose GPU for `cuda` or CPU for `cpu` before Setup. Setup installs the selected repository revision and runs tests in a child process with CUDA hidden; the notebook keeps its selected runtime.
+2. **CPU preflight:** run the tiny packaged pipeline check with one epoch and coarse references. It uses CPU and does not exercise edited notebook callbacks or measure scientific accuracy. Its outputs are temporary under Colab `/content` and do not go to Drive.
 3. **Notebook code check:** smoke-test the edited model, sampler, optimizer, and scheduler before preparation.
-4. **CPU preparation:** run the notebook's Python API with the selected problem, Monte Carlo settings, and interior-sampling function. It solves the finite-difference reference grids and generates the shared Feynman–Kac labels. Live path and resolution progress appears in the notebook cell. Completed references, labels, metadata, and the anchor plot go to a dated Drive folder.
-5. **Training:** run the Python API with the same Drive folder and the model class, sampler, optimizer, and scheduler code defined above. If `device` is `cuda`, switch to a GPU runtime first; if it is `cpu`, remain on CPU. Training reports epoch, elapsed time, ETA, objective, and active raw loss components. Metrics and checkpoints are saved to Drive; CPU preparation is not repeated.
+4. **CPU preparation:** run the notebook's Python API with the selected problem, Monte Carlo settings, and interior-sampling function. It solves the finite-difference reference grids and generates the shared Feynman–Kac labels on CPU, even when a GPU runtime is attached. Live path and resolution progress appears in the notebook cell. Completed references, labels, metadata, and the anchor plot go to a dated Drive folder.
+5. **Training:** run the Python API with the same Drive folder and the model class, sampler, optimizer, and scheduler code defined above. Training runs on the device in `DEVICE`; keep the runtime selected before Setup. No runtime change or repeat of CPU preparation is needed. Training reports epoch, elapsed time, ETA, objective, and active raw loss components. Metrics and checkpoints are saved to Drive.
 6. **Inspect or evaluate:** read the saved metrics and plots or reevaluate saved checkpoints on CPU.
 7. **Resume:** rerun the notebook's model and callback cells, then call the resume cell with the existing run folder. Use the same source code and repository revision. The runner checks the revision and callback names, but cannot detect edits inside notebook cells; if any custom code changed, start a new run folder.
 
-A runtime reset clears notebook variables and local files. Rerun Setup with the same branch and rerun the cells that define the custom functions before training, evaluation, or resume. The five-method pilot is a single-seed exploratory run, not a final paper result; a paper study needs multiple seeds, reference-grid and Monte Carlo convergence checks, and matched compute budgets.
+A manual runtime reset clears notebook variables and local files. Rerun Setup with the same branch and the cells that define the custom functions before training, evaluation, or resume. Completed CPU preparation in Drive does not need to be repeated. The five-method pilot is a single-seed exploratory run, not a final paper result; a paper study needs multiple seeds, reference-grid and Monte Carlo convergence checks, and matched compute budgets.
 
 For a terminal run using the built-in model and the versioned pilot configuration, use the same output directory for both stages:
 
