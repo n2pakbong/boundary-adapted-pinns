@@ -1011,11 +1011,28 @@ def evaluate_saved_models(
     dtype = _dtype(str(raw["dtype"]))
     device = torch.device("cpu")
     batch_size = int(raw.get("evaluation_batch_size", 16_384))
+    current_model_fingerprint = _callable_fingerprint(model_factory)
     metadata_path = output_dir / "comparison_metadata.json"
     metadata = json.loads(metadata_path.read_text(encoding="utf-8")) if metadata_path.is_file() else {}
     methods: dict[str, dict[str, Any]] = {}
 
     for method in raw["methods"]:
+        method_metadata_path = output_dir / method / "metadata.json"
+        method_metadata = (
+            json.loads(method_metadata_path.read_text(encoding="utf-8"))
+            if method_metadata_path.is_file()
+            else {}
+        )
+        saved_model_fingerprint = method_metadata.get(
+            "runtime_hook_fingerprints", {}
+        ).get("model")
+        if (
+            saved_model_fingerprint is not None
+            and saved_model_fingerprint != current_model_fingerprint
+        ):
+            raise ValueError(
+                f"The model code for {method} differs from the saved checkpoint."
+            )
         config = PeriodicCommittorConfig(
             seed=int(raw["seed"]),
             device="cpu",
