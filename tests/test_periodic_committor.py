@@ -741,7 +741,7 @@ def test_comparison_config_accepts_pytorch_activations_and_arguments(
     _validate_comparison_config(config)
 
 
-def test_comparison_config_accepts_importable_custom_activation(monkeypatch) -> None:
+def test_comparison_config_accepts_importable_custom_module_and_function(monkeypatch) -> None:
     import sys
     import types
 
@@ -756,6 +756,11 @@ def test_comparison_config_accepts_importable_custom_activation(monkeypatch) -> 
             return torch.tanh(values) + values.square() * 0.01
 
     module.CustomSmoothActivation = CustomSmoothActivation
+
+    def custom_activation_function(values, beta=1.0):
+        return torch.tanh(beta * values)
+
+    module.custom_activation_function = custom_activation_function
     monkeypatch.setitem(sys.modules, module.__name__, module)
     config = {
         "seed": 7,
@@ -786,3 +791,12 @@ def test_comparison_config_accepts_importable_custom_activation(monkeypatch) -> 
     }
 
     _validate_comparison_config(config)
+    function_config = {
+        **config,
+        "model": {
+            **config["model"],
+            "activation": "test_custom_activation_config.custom_activation_function",
+            "activation_kwargs": {"beta": 0.75},
+        },
+    }
+    _validate_comparison_config(function_config)
