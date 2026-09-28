@@ -25,10 +25,11 @@
   },
   "model": {
     "width": 64,
-    "depth": 2,
+    "depth": 4,
     "activation": "tanh",
+    "gain": 1,
     "architecture": "periodic_mlp",
-    "initialization": "pytorch_default"
+    "initialization": "xavier_normal"
   },
   "training": {
     "epochs": 6000,
@@ -74,5 +75,5 @@
     128,
     256
   ],
-  "evaluation_batch_size": 8192
+  "evaluation_batch_size": 16384
 }
