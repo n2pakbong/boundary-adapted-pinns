@@ -455,7 +455,8 @@ def _load_cpu_preparation(
         if _preparation_inputs(saved_config) != _preparation_inputs(raw):
             raise ValueError(
                 "The selected problem, reference grids, or Monte Carlo settings differ "
-                "from the saved CPU preparation. Prepare a new folder for those changes."
+                "from the saved CPU preparation. Restore the saved preparation settings, "
+                "or create a new folder for the changed preparation."
             )
     schema_version = preparation.get("preparation_schema_version", 1)
     if schema_version != PREPARATION_SCHEMA_VERSION:
@@ -473,7 +474,7 @@ def _load_cpu_preparation(
     ):
         raise ValueError(
             "The saved Monte Carlo anchors were generated with different sampler code. "
-            "Restore that function or create a new preparation folder."
+            "Restore the sampler from preparation or create a new preparation folder."
         )
     saved_sampler = preparation.get(
         "interior_sampler", "uniform rejection on the punctured torus"
@@ -494,7 +495,7 @@ def _load_cpu_preparation(
     ):
         raise ValueError(
             "The saved finite-difference grids do not match the selected grid sizes. "
-            "Prepare a new folder for those changes."
+            "Restore the saved grid sizes or create a new preparation folder."
         )
     expected_reference = f"reference_fd_{max(map(int, raw['reference_grid_sizes']))}.npz"
     reference_file = output_dir / str(preparation.get("reference_file", ""))
