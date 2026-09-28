@@ -320,6 +320,24 @@ def _boundary_mse(
     return (weights * squared_error).sum() / weights.sum()
 
 
+def _truncate_metrics_to_epoch(metrics_path: Path, checkpoint_epoch: int) -> None:
+    """Discard log rows newer than the checkpoint before continuing a run."""
+    if not metrics_path.is_file():
+        return
+    kept: list[str] = []
+    for line in metrics_path.read_text(encoding="utf-8").splitlines():
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if int(record.get("epoch", -1)) <= checkpoint_epoch:
+            kept.append(line)
+    metrics_path.write_text(
+        "".join(f"{line}\\n" for line in kept),
+        encoding="utf-8",
+    )
+
+
 def run_periodic_committor(
     config: PeriodicCommittorConfig,
     run_dir: Path,
@@ -480,6 +498,8 @@ def run_periodic_committor(
         else None
     )
     metrics_path = run_dir / "metrics.jsonl"
+    if resume:
+        _truncate_metrics_to_epoch(metrics_path, start_epoch - 1)
     metrics_mode = "a" if resume else "w"
     mc_x = mc_y = None
     if mc_data is not None:
