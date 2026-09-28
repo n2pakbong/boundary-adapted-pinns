@@ -667,6 +667,40 @@ def test_five_paper_methods_report_every_final_loss_component_on_cpu(tmp_path, m
     }
 
 
+def test_cpu_preparation_reuse_ignores_code_revision_but_checks_schema(
+    tmp_path, monkeypatch
+) -> None:
+    import boundary_pinn.experiments.committor.periodic_two_well.comparison as comparison
+
+    raw = {
+        "problem": {
+            "a": 1.0,
+            "b": 0.6,
+            "epsilon": 0.4,
+            "source_center": [0.25, 0.0],
+            "target_center": [0.75, 0.0],
+            "set_radius": 0.5,
+        },
+        "reference_grid_sizes": [16, 32],
+        "training": {},
+    }
+    monkeypatch.setattr(comparison, "_git_revision", lambda: "preparation-revision")
+    comparison._prepare_cpu_artifacts(raw, tmp_path)
+    marker_path = tmp_path / "cpu_preparation.json"
+    marker = json.loads(marker_path.read_text(encoding="utf-8"))
+    marker.pop("preparation_schema_version")
+    marker_path.write_text(json.dumps(marker), encoding="utf-8")
+
+    monkeypatch.setattr(comparison, "_git_revision", lambda: "new-training-revision")
+    reference, _, _ = comparison._load_cpu_preparation(raw, tmp_path)
+    assert reference.values.shape == (32, 32)
+
+    marker["preparation_schema_version"] = 999
+    marker_path.write_text(json.dumps(marker), encoding="utf-8")
+    with pytest.raises(ValueError, match="incompatible data format"):
+        comparison._load_cpu_preparation(raw, tmp_path)
+
+
 def test_cpu_preparation_uses_no_cuda_even_when_training_config_requests_it(tmp_path, monkeypatch) -> None:
     import json
 
