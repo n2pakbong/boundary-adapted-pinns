@@ -418,6 +418,12 @@ def run_periodic_committor(
         "optimizer": _callable_name(optimizer_factory, "repository optimizer builder"),
         "scheduler": _callable_name(scheduler_factory, "repository scheduler builder"),
     }
+    runtime_hook_fingerprints = {
+        "model": _callable_fingerprint(model_factory),
+        "interior_sampler": _callable_fingerprint(interior_sampler),
+        "optimizer": _callable_fingerprint(optimizer_factory),
+        "scheduler": _callable_fingerprint(scheduler_factory),
+    }
     if resume and metadata_path.exists():
         prior_metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
         prior_version = prior_metadata.get("objective_version")
@@ -432,6 +438,15 @@ def run_periodic_committor(
                 "The model, sampler, optimizer, or scheduler used for this resume "
                 "does not match the saved run. Restore the original notebook code "
                 "or start a new output folder."
+            )
+        prior_fingerprints = prior_metadata.get("runtime_hook_fingerprints")
+        if (
+            prior_fingerprints is not None
+            and prior_fingerprints != runtime_hook_fingerprints
+        ):
+            raise RuntimeError(
+                "The model, sampler, optimizer, or scheduler code changed since the "
+                "checkpoint was saved. Restore the original code or start a new run folder."
             )
     mc_data = _load_or_generate_mc_data(config, problem, run_dir, mc_data)
     if uses_paper_objective and mc_data is None:
@@ -455,6 +470,7 @@ def run_periodic_committor(
             "device": str(requested_device),
             "objective_version": objective_version,
             "runtime_hooks": runtime_hooks,
+            "runtime_hook_fingerprints": runtime_hook_fingerprints,
         })
     elif not config_path.exists():
         raise FileNotFoundError(f"Cannot resume: {config_path} is missing.")
