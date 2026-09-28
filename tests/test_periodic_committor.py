@@ -736,6 +736,18 @@ def test_loss_plot_handles_nonfinite_and_zero_series_without_log_warning(tmp_pat
 
 
 
+def test_resume_discards_metrics_after_last_checkpoint(tmp_path) -> None:
+    from boundary_pinn.problems.committor.training import _truncate_metrics_to_epoch
+
+    path = tmp_path / "metrics.jsonl"
+    path.write_text(
+        '{"epoch": 1}\\n{"epoch": 2}\\n{"epoch": 3}\\n{"partial":',
+        encoding="utf-8",
+    )
+    _truncate_metrics_to_epoch(path, checkpoint_epoch=2)
+    assert [json.loads(line)["epoch"] for line in path.read_text().splitlines()] == [1, 2]
+
+
 def test_wall_clock_controls_console_only_and_metrics_keep_every_epoch(tmp_path, capsys) -> None:
     import json
 
