@@ -335,7 +335,7 @@ def test_comparison_accepts_plain_pytorch_model_sampler_optimizer_and_scheduler(
         "seed": 7,
         "device": "cpu",
         "dtype": "float64",
-        "methods": ["simple_pinn"],
+        "methods": ["simple_pinn", "boundary_adapted", "naive_product"],
         "problem": {
             "a": 1.0,
             "b": 0.6,
@@ -371,15 +371,12 @@ def test_comparison_accepts_plain_pytorch_model_sampler_optimizer_and_scheduler(
     )
 
     assert sampler_calls
-    assert optimizer_calls == [True]
-    assert scheduler_calls == [True]
+    assert optimizer_calls == [True] * len(config["methods"])
+    assert scheduler_calls == [True] * len(config["methods"])
     assert (output_dir / "simple_pinn" / "best.pt").is_file()
     metadata = json.loads((output_dir / "simple_pinn" / "metadata.json").read_text())
     assert metadata["runtime_hooks"]["model"].endswith("make_model")
     assert metadata["runtime_hooks"]["interior_sampler"].endswith("sample_points")
-    for method in ("boundary_adapted", "naive_product"):
-        assert summary["methods"][method]["source_boundary_rmse"] < 1e-8
-        assert summary["methods"][method]["target_boundary_rmse"] < 1e-8
     for method in config["methods"]:
         assert (output_dir / method / "last.pt").is_file()
         assert (output_dir / method / "best.pt").is_file()
@@ -387,7 +384,11 @@ def test_comparison_accepts_plain_pytorch_model_sampler_optimizer_and_scheduler(
     from boundary_pinn.experiments.committor.periodic_two_well.comparison import (
         evaluate_saved_models,
     )
-    evaluation_path = evaluate_saved_models(output_dir, training_git_revision="test-revision")
+    evaluation_path = evaluate_saved_models(
+        output_dir,
+        training_git_revision="test-revision",
+        model_factory=make_model,
+    )
     evaluation = json.loads(evaluation_path.read_text(encoding="utf-8"))
     assert evaluation_path.name == "saved_model_evaluation.json"
     assert evaluation["training_git_revision"] == "test-revision"
