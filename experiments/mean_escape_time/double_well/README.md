@@ -1,7 +1,5 @@
-# Two-dimensional double-well mean escape time
+# Double-well mean escape time
 
-These notebooks contain the double-well comparison reported in the boundary-adapted PINN paper. They compare the standard, variational, over-enforced, under-enforced, and boundary-adapted methods.
+Open [`double_well_mean_escape_time.ipynb`](double_well_mean_escape_time.ipynb). It is the single guided comparison for the five paper methods.
 
-The five notebooks compare the standard, variational, over-enforced, under-enforced, and boundary-adapted PINN methods reported in the paper. Their mathematical development, references, code, and saved outputs remain with each experiment.
-
-The notebooks use the original Colab workflow. Their full training cells may require GPU time. The maintained Python OU-disk example is a separate test problem and is not a replacement for the double-well experiment.
+The original notebooks used FEniCS for the reference solution. The public notebook assembles the same P1 weak problem with `scikit-fem`, which installs directly in Colab. Historical paper-run values remain identified as outputs from the earlier FEniCS workflow until the comparison is rerun.

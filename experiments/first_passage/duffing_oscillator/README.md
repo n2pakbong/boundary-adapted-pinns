@@ -1,9 +1,5 @@
-# Duffing oscillator first-passage example
+# Duffing oscillator mean escape time
 
-The retained notebooks cover three complementary parts of this problem:
+Open [`duffing_mean_escape_time.ipynb`](duffing_mean_escape_time.ipynb). It combines the trajectory study, Monte Carlo mean-exit estimate, and boundary-adapted PINN in one example with `zeta = 0.08`, `epsilon = 1e-5`, and disk radius `2`.
 
-- `notebooks/boundary_pinn.ipynb`: the Duffing first-passage equation and boundary-adapted PINN.
-- `notebooks/penalty_pinn.ipynb`: a PINN baseline that adds a residual penalty.
-- `plots/Duffing_Oscillator_plot.ipynb`: sample trajectories of the Duffing diffusion.
-
-The training notebooks include the model formulation and explanatory material. They accompany a first-passage problem, distinct from the paper's mean escape time examples.
+No trained Duffing PINN result was stored in the previous notebooks. The public notebook therefore makes no reproduction claim and reports numerical values only after the reader runs it.
