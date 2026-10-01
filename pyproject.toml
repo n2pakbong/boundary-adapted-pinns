@@ -15,7 +15,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["ipykernel>=6", "nbclient>=0.10", "nbformat>=5", "pytest>=8"]
+notebooks = ["scikit-fem>=11,<13"]
 
 [project.scripts]
 boundary-pinn = "boundary_pinn.cli:main"
