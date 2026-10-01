@@ -8,4 +8,4 @@ boundary-pinn experiments/mean_escape_time/ou_disk/configs/boundary_factor_smoke
   --run-dir runs/ou_disk/boundary_factor_smoke
 ```
 
-This implementation example is separate from the source notebooks for the OU-ball paper comparison in `../ou_ball/notebooks/`.
+This small package example is separate from the guided OU paper comparison in [`../ou_ball/ou_mean_escape_time.ipynb`](../ou_ball/ou_mean_escape_time.ipynb).

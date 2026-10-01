@@ -21,7 +21,7 @@ class OUDiskProblem:
     sigma: float = 1.0
 
     def signed_distance_factor(self, x: torch.Tensor) -> torch.Tensor:
-        """First-order-normalized defining function used by the legacy PINNs.
+        """First-order-normalized defining function used by the paper PINNs.
 
         It is positive inside the disk, vanishes on the boundary, and has
         outward normal derivative -1 on the boundary.
