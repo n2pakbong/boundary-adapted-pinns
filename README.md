@@ -6,6 +6,26 @@ This repository studies how a physics-informed neural network (PINN) should impo
 
 **Start here:** [the equations and method](#the-problem-and-the-method) · [notebooks](#notebooks) · [how the code is organized](#how-the-code-is-organized) · [run locally](#run-locally) · [citation](#citation)
 
+## Citation
+
+To cite the method or results, cite the [paper on arXiv](https://arxiv.org/abs/2607.19167) or its [DOI](https://doi.org/10.48550/arXiv.2607.19167). To cite the software, use GitHub's **Cite this repository** link from [CITATION.cff](CITATION.cff).
+
+<details>
+<summary>BibTeX for the paper</summary>
+
+```bibtex
+@misc{tepakbong2026boundaryadapted,
+  title = {Boundary-Adapted PINNs for Elliptic Dirichlet Problems: $H^2(\Omega)$ A Priori Error Bounds with Application to Mean Escape Time Computation},
+  author = {Tepakbong, Nathanael and Fan, Jun and Zhou, Xiang and Zhou, Ding-Xuan},
+  year = {2026},
+  eprint = {2607.19167},
+  archivePrefix = {arXiv},
+  doi = {10.48550/arXiv.2607.19167},
+  url = {https://arxiv.org/abs/2607.19167}
+}
+```
+
+</details>
 ## The problem and the method
 
 For a diffusion in a domain $\Omega$,
@@ -35,13 +55,13 @@ E_{H^k}=\frac{\|\tau_\theta-\tau_{\mathrm{ref}}\|_{H^k(\Omega)}}{\|\tau_{\mathrm
 $$
 where $\tau_{\mathrm{ref}}$ is the reference solution. At $k=0$ this is relative $L^2$ error; $H^1$ and $H^2$ also measure first- and second-derivative error. The OU example uses an analytical reference, while the double-well example uses a numerical one.
 
-The periodic committor asks a related but different question: what is the probability of reaching target $B$ before target $A$? Its solution satisfies
+The periodic committor is a hitting probability: what is the probability of reaching target $B$ before target $A$? Let $\\tau_A$ and $\\tau_B$ be the first times the diffusion reaches those targets. Then
 $$
-q(x)=\mathbb P_x(\tau_B<\tau_A),\qquad
-\mathcal Lq=0\text{ in }D=\Omega\setminus(A\cup B),\qquad
-q|_A=0,\quad q|_B=1.
+q(x)=\\mathbb P_x(\\tau_B<\\tau_A),\\qquad
+\\mathcal Lq=0\\text{ in }D=\\Omega\\setminus(A\\cup B),\\qquad
+q=0\\text{ on }\\partial A,\\quad q=1\\text{ on }\\partial B.
 $$
-The example uses the same boundary-adapted idea for these two boundary values.
+The code represents it as $q_\\theta=g+\\rho^\\alpha N_\\theta$, where $g$ supplies the two boundary values and $\\rho$ vanishes on both target boundaries; $\\alpha=1$ is the normalized choice.
 
 ## Notebooks
 
@@ -71,28 +91,8 @@ Use Python 3.10 or newer. Install the notebook and test dependencies, then run t
 
 The base package installs with `python -m pip install -e .`. Tests check code behavior; they do not run full experiments or establish numerical accuracy.
 
-## Citation
-
-To cite the method or results, cite the [paper on arXiv](https://arxiv.org/abs/2607.19167) or its [DOI](https://doi.org/10.48550/arXiv.2607.19167). To cite the software, use GitHub's **Cite this repository** link from [CITATION.cff](CITATION.cff).
-
-<details>
-<summary>BibTeX for the paper</summary>
-
-```bibtex
-@misc{tepakbong2026boundaryadapted,
-  title = {Boundary-Adapted PINNs for Elliptic Dirichlet Problems: $H^2(\Omega)$ A Priori Error Bounds with Application to Mean Escape Time Computation},
-  author = {Tepakbong, Nathanael and Fan, Jun and Zhou, Xiang and Zhou, Ding-Xuan},
-  year = {2026},
-  eprint = {2607.19167},
-  archivePrefix = {arXiv},
-  doi = {10.48550/arXiv.2607.19167},
-  url = {https://arxiv.org/abs/2607.19167}
-}
-```
-
-</details>
 ## License
 
 The code is released under the [MIT license](LICENSE).
 
-**Last updated: 2026-10-14 03:09 +08:00.**
+**Last updated: 2026-10-14 03:15 +08:00.**
