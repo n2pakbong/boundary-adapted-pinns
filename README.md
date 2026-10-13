@@ -2,7 +2,7 @@
 
 [![arXiv:2607.19167](https://img.shields.io/badge/arXiv-2607.19167-b31b1b.svg)](https://arxiv.org/abs/2607.19167) [![Tests](https://github.com/n2pakbong/boundary-adapted-pinns/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/n2pakbong/boundary-adapted-pinns/actions/workflows/tests.yml) [![MIT license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-This repository studies how a physics-informed neural network (PINN) should impose Dirichlet boundary values when accuracy in the solution's derivatives matters. Its central construction builds the boundary condition into the network and uses a first-order normalized distance factor; the paper proves why that extra normalization matters for its $H^2(\Omega)$ error bounds. The repository contains the paper's mean-escape-time code and notebooks, plus a periodic committor example.
+This repository accompanies work on boundary-adapted physics-informed neural networks (PINNs) for second-order uniformly elliptic Dirichlet problems. The paper proves a priori $H^2(\Omega)$ error bounds, and the code and notebooks illustrate the method on mean escape time and a periodic committor.
 
 **Start here:** [the equations and method](#the-problem-and-the-method) · [notebooks](#notebooks) · [how the code is organized](#how-the-code-is-organized) · [run locally](#run-locally) · [citation](#citation)
 
@@ -28,41 +28,22 @@ To cite the method or results, cite the [paper on arXiv](https://arxiv.org/abs/2
 </details>
 ## The problem and the method
 
-For a diffusion in a domain $\Omega$,
+The paper studies second-order uniformly elliptic Dirichlet problems. Under its regularity assumptions, the target solution $u^\star$ satisfies
 $$
-dX_t=b(X_t)\,dt+\sigma(X_t)\,dW_t,
+\begin{cases}
+\mathscr L u^\star=f & \text{in }\Omega,\\
+u^\star=g & \text{on }\partial\Omega.
+\end{cases}
 $$
-where $b$ is the drift, $\sigma$ is the diffusion matrix, and $W_t$ is Brownian motion, the generator is
-$$
-\mathcal L f(x)=\sum_i b_i(x)\partial_i f(x)+\frac12\sum_{i,j}(\sigma\sigma^\top)_{ij}(x)\partial_{ij}f(x).
-$$
-The mean escape time is the expected time until the process first leaves $\Omega$:
-$$
-\tau(x)=\mathbb E_x[\tau_\Omega],\qquad
-\tau_\Omega=\inf\{t\geq0:X_t\notin\Omega\}.
-$$
-It solves the backward equation $\mathcal L\tau=-1$ in $\Omega$, with $\tau=0$ on its boundary.
+Here $\Omega$ is the domain, $f$ is the forcing term, and $g$ prescribes the boundary values. A PINN fits the equation by minimizing its residual $\mathscr L u_\theta-f$ at sampled points in $\Omega$.
 
-A standard neural approximation is $N_\theta(x)$. The boundary-adapted approximation is
+The boundary-adapted trial function is
 $$
-\tau_\theta(x)=\rho(x)N_\theta(x),
+u_\theta(x)=g(x)+\rho(x)v_\theta(x),
 $$
-where $\rho$ vanishes on $\partial\Omega$. This makes the boundary value exact for every network parameter $\theta$. For the paper's $H^2$ error theory, however, vanishing alone is not enough: the smooth distance factor must also satisfy $\partial_\nu\rho=1$, where $\nu$ is the inward unit normal. This first-order normalization keeps $\tau/\rho$ regular up to the boundary under the paper's assumptions. The theorem concerns minimizers of the sampled residual objective; it does not guarantee that an optimizer finds one. See the [paper](https://arxiv.org/html/2607.19167) for the assumptions and bounds.
+where $g$ is extended smoothly into the domain, $v_\theta$ is a neural network, and the smooth distance approximation $\rho$ vanishes on $\partial\Omega$. Thus $u_\theta=g$ on the boundary for every choice of network parameters.
 
-The notebooks compare a standard PINN with a boundary penalty, the normalized factor $\rho$, the stronger and weaker factors $\rho^{3/2}$ and $\rho^{1/2}$, and a variational PINN that imposes boundary data in a weak formulation. Mean-escape-time training also uses Monte Carlo solution values at interior points as data targets. The reported relative Sobolev error is
-$$
-E_{H^k}=\frac{\|\tau_\theta-\tau_{\mathrm{ref}}\|_{H^k(\Omega)}}{\|\tau_{\mathrm{ref}}\|_{H^k(\Omega)}},\qquad k=0,1,2,
-$$
-where $\tau_{\mathrm{ref}}$ is the reference solution. At $k=0$ this is relative $L^2$ error; $H^1$ and $H^2$ also measure first- and second-derivative error. The OU example uses an analytical reference, while the double-well example uses a numerical one.
-
-The periodic committor is a hitting probability: what is the probability of reaching target $B$ before target $A$? Let $\\tau_A$ and $\\tau_B$ be the first times the diffusion reaches those targets. Then
-$$
-q(x)=\\mathbb P_x(\\tau_B<\\tau_A),\\qquad
-\\mathcal Lq=0\\text{ in }D=\\Omega\\setminus(A\\cup B),\\qquad
-q=0\\text{ on }\\partial A,\\quad q=1\\text{ on }\\partial B.
-$$
-The code represents it as $q_\\theta=g+\\rho^\\alpha N_\\theta$, where $g$ supplies the two boundary values and $\\rho$ vanishes on both target boundaries; $\\alpha=1$ is the normalized choice.
-
+For the paper's $H^2$ error bounds, the first inward normal derivative of $\rho$ must be positive on the boundary: $\partial_\nu\rho(q)>0$ for $q\in\partial\Omega$. This first-order normalization makes $(u^\star-g)/\rho$ smooth up to the boundary under the paper's assumptions. The $H^2$ norm measures error in the solution and its first and second derivatives. The bounds concern the sampled residual minimization problem; they do not guarantee that a training optimizer reaches a minimizer. See the [paper](https://arxiv.org/html/2607.19167) for the precise assumptions and rates.
 ## Notebooks
 
 | Example | What it computes |
@@ -95,4 +76,4 @@ The base package installs with `python -m pip install -e .`. Tests check code be
 
 The code is released under the [MIT license](LICENSE).
 
-**Last updated: 2026-10-14 03:15 +08:00.**
+**Last updated: 2026-10-14 03:19 +08:00.**
