@@ -60,7 +60,7 @@ The reusable implementation is under `src/boundary_pinn/`: problem modules defin
 
 For a full example of how these pieces connect, follow the [periodic committor guide](experiments/committor/periodic_two_well/README.md) to its [problem definition](src/boundary_pinn/problems/committor/periodic_two_well.py), [training methods](src/boundary_pinn/problems/committor/training.py), and [comparison runner](src/boundary_pinn/experiments/committor/periodic_two_well/comparison.py). For a mean-escape-time run, start with the [OU guide](experiments/mean_escape_time/ou_ball/README.md) beside its notebook.
 
-To adapt the code to a new PDE, start from the closest problem module and update the operator, domain and boundary samplers, and reference calculation together. The [committor guide](experiments/committor/periodic_two_well/README.md) shows those pieces in context. Changing a settings file alone does not add support for a new geometry or equation.
+To adapt the code to a new PDE, start from the closest problem module and update its operator, domain, and boundary samplers, then connect it to an experiment runner. Add a reference solution if you need reference-based error metrics. The [committor guide](experiments/committor/periodic_two_well/README.md) follows these pieces through one working example; changing a settings file alone does not add support for a new geometry or equation.
 
 ## Run locally
 
@@ -73,22 +73,26 @@ The base package installs with `python -m pip install -e .`. Tests check code be
 
 ## Citation
 
-For academic use of the method or results, cite the paper:
+To cite the method or results, cite the [paper on arXiv](https://arxiv.org/abs/2607.19167) or its [DOI](https://doi.org/10.48550/arXiv.2607.19167). To cite the software, use GitHub's **Cite this repository** link from [CITATION.cff](CITATION.cff).
 
-    @misc{tepakbong2026boundaryadapted,
-      title = {Boundary-Adapted PINNs for Elliptic Dirichlet Problems: $H^2(\Omega)$ A Priori Error Bounds with Application to Mean Escape Time Computation},
-      author = {Tepakbong, Nathanael and Fan, Jun and Zhou, Xiang and Zhou, Ding-Xuan},
-      year = {2026},
-      eprint = {2607.19167},
-      archivePrefix = {arXiv},
-      doi = {10.48550/arXiv.2607.19167},
-      url = {https://arxiv.org/abs/2607.19167}
-    }
+<details>
+<summary>BibTeX for the paper</summary>
 
-For the software citation, use GitHub's **Cite this repository** link from [CITATION.cff](CITATION.cff). The paper is available on [arXiv](https://arxiv.org/abs/2607.19167) and through its [DOI](https://doi.org/10.48550/arXiv.2607.19167).
+```bibtex
+@misc{tepakbong2026boundaryadapted,
+  title = {Boundary-Adapted PINNs for Elliptic Dirichlet Problems: $H^2(\Omega)$ A Priori Error Bounds with Application to Mean Escape Time Computation},
+  author = {Tepakbong, Nathanael and Fan, Jun and Zhou, Xiang and Zhou, Ding-Xuan},
+  year = {2026},
+  eprint = {2607.19167},
+  archivePrefix = {arXiv},
+  doi = {10.48550/arXiv.2607.19167},
+  url = {https://arxiv.org/abs/2607.19167}
+}
+```
 
+</details>
 ## License
 
 The code is released under the [MIT license](LICENSE).
 
-**Last updated: 2026-10-14 03:08 +08:00.**
+**Last updated: 2026-10-14 03:09 +08:00.**
