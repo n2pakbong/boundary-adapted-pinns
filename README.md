@@ -6,6 +6,23 @@ This repository pairs a mathematical paper with PyTorch code and runnable notebo
 
 **Start:** [math and method](#the-mathematical-problem) · [notebooks](#notebooks) · [code map](#where-to-find-things) · [run locally](#run-locally) · [citation](#citation)
 
+
+## Citation
+
+For academic work using the method or results, cite the paper:
+
+    @misc{tepakbong2026boundaryadapted,
+      title = {Boundary-Adapted PINNs for Elliptic Dirichlet Problems: $H^2(\Omega)$ A Priori Error Bounds with Application to Mean Escape Time Computation},
+      author = {Tepakbong, Nathanael and Fan, Jun and Zhou, Xiang and Zhou, Ding-Xuan},
+      year = {2026},
+      eprint = {2607.19167},
+      archivePrefix = {arXiv},
+      doi = {10.48550/arXiv.2607.19167},
+      url = {https://arxiv.org/abs/2607.19167}
+    }
+
+To cite the software, use GitHub's **Cite this repository** link from [CITATION.cff](CITATION.cff). See the paper on [arXiv](https://arxiv.org/abs/2607.19167) or by [DOI](https://doi.org/10.48550/arXiv.2607.19167).
+
 ## The mathematical problem
 
 For a diffusion $dX_t=b(X_t)\,dt+\sigma(X_t)\,dW_t$ in a domain $\Omega$, let $\tau_\Omega$ be the first time the process leaves $\Omega$. Its mean escape time is $\tau(x)=\mathbb E_x[\tau_\Omega]$. It solves the elliptic boundary-value problem
@@ -65,22 +82,6 @@ The base package alone installs with `python -m pip install -e .`. Its optional 
 Start with the problem module closest to your PDE. A new problem needs Python implementations of its operator, geometry, domain and boundary samplers, and reference solution, connected to an experiment runner; changing a settings file alone is not enough. The shared interface is still evolving.
 
 The committor notebook generates fresh training and Monte Carlo seeds for a new run and saves them in its configuration. Its dated Drive folder contains the settings, reference and label data, metrics, figures, and checkpoints. The mean-escape-time aggregates shown in the notebooks are historical outputs; later code fixes mean a fresh run will not reproduce them exactly.
-
-## Citation
-
-For academic work using the method or results, cite the paper:
-
-    @misc{tepakbong2026boundaryadapted,
-      title = {Boundary-Adapted PINNs for Elliptic Dirichlet Problems: $H^2(\Omega)$ A Priori Error Bounds with Application to Mean Escape Time Computation},
-      author = {Tepakbong, Nathanael and Fan, Jun and Zhou, Xiang and Zhou, Ding-Xuan},
-      year = {2026},
-      eprint = {2607.19167},
-      archivePrefix = {arXiv},
-      doi = {10.48550/arXiv.2607.19167},
-      url = {https://arxiv.org/abs/2607.19167}
-    }
-
-To cite the software, use GitHub's **Cite this repository** link from [CITATION.cff](CITATION.cff). See the paper on [arXiv](https://arxiv.org/abs/2607.19167) or by [DOI](https://doi.org/10.48550/arXiv.2607.19167).
 
 ## License
 
