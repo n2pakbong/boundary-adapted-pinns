@@ -75,5 +75,3 @@ The base package installs with `python -m pip install -e .`. Tests check code be
 ## License
 
 The code is released under the [MIT license](LICENSE).
-
-**Last updated: 2026-10-14 03:20 +08:00.**
