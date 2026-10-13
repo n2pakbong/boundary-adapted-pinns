@@ -8,42 +8,40 @@ This repository accompanies work on boundary-adapted physics-informed neural net
 
 ## Citation
 
-To cite the method or results, cite the [paper on arXiv](https://arxiv.org/abs/2607.19167) or its [DOI](https://doi.org/10.48550/arXiv.2607.19167). To cite the software, use GitHub's **Cite this repository** link from [CITATION.cff](CITATION.cff).
-
-<details>
-<summary>BibTeX for the paper</summary>
+To cite this paper, copy this BibTeX entry into your bibliography:
 
 ```bibtex
 @misc{tepakbong2026boundaryadapted,
-  title = {Boundary-Adapted PINNs for Elliptic Dirichlet Problems: $H^2(\Omega)$ A Priori Error Bounds with Application to Mean Escape Time Computation},
+  title = {{Boundary-Adapted PINNs for Elliptic Dirichlet Problems: $H^2(\Omega)$ A Priori Error Bounds with Application to Mean Escape Time Computation}},
   author = {Tepakbong, Nathanael and Fan, Jun and Zhou, Xiang and Zhou, Ding-Xuan},
   year = {2026},
   eprint = {2607.19167},
   archivePrefix = {arXiv},
+  primaryClass = {math.NA},
   doi = {10.48550/arXiv.2607.19167},
   url = {https://arxiv.org/abs/2607.19167}
 }
 ```
-
-</details>
-
 ## The problem and the method
 
 The paper considers second-order uniformly elliptic Dirichlet problems. Given an operator $\mathscr L$, forcing $f$, and boundary data $g$, the goal is to find $u^\star$ such that
-$$
+
+```math
 \begin{cases}
 \mathscr L u^\star=f & \text{in }\Omega,\\
 u^\star=g & \text{on }\partial\Omega.
 \end{cases}
-$$
+```
+
 A PINN approximates $u^\star$ by minimizing the equation's residual at sampled points. The boundary-adapted trial function is
-$$
-u_\theta(x)=g(x)+\rho(x)v_\theta(x),
-$$
-where $g$ extends the boundary data into the domain, $\rho$ vanishes on the boundary, and $v_\theta$ is a neural network. This construction makes $u_\theta=g$ on $\partial\Omega$ for every choice of network parameters.
+
+```math
+u_\theta(x)=g(x)+\rho(x)v_\theta(x).
+```
+
+Here $g$ extends the boundary data into the domain, $\rho$ vanishes on the boundary, and $v_\theta$ is a neural network. This makes $u_\theta=g$ on $\partial\Omega$ for every choice of network parameters.
 
 The paper proves a priori $H^2(\Omega)$ error bounds. The $H^2$ norm measures error in the solution and its first and second derivatives.
-
 ## Notebooks
 
 | Example | What it computes |
