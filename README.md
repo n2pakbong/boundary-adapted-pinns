@@ -22,6 +22,7 @@ To cite this paper, copy this BibTeX entry into your bibliography:
   url = {https://arxiv.org/abs/2607.19167}
 }
 ```
+
 ## The problem and the method
 
 The paper considers second-order uniformly elliptic Dirichlet problems. Given an operator $\mathscr L$, forcing $f$, and boundary data $g$, the goal is to find $u^\star$ such that
@@ -42,6 +43,7 @@ u_\theta(x)=g(x)+\rho(x)v_\theta(x).
 Here $g$ extends the boundary data into the domain, $\rho$ vanishes on the boundary, and $v_\theta$ is a neural network. This makes $u_\theta=g$ on $\partial\Omega$ for every choice of network parameters.
 
 The paper proves a priori $H^2(\Omega)$ error bounds. The $H^2$ norm measures error in the solution and its first and second derivatives.
+
 ## Notebooks
 
 | Example | What it computes |
