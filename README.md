@@ -1,41 +1,41 @@
 # Boundary-adapted PINNs for elliptic Dirichlet problems
 
-This repository accompanies [*Boundary-Adapted PINNs for Elliptic Dirichlet Problems: H²(Ω) A Priori Error Bounds with Application to Mean Escape Time Computation*](https://arxiv.org/abs/2607.19167).
+Code and runnable notebooks for [*Boundary-Adapted PINNs for Elliptic Dirichlet Problems: H²(Ω) A Priori Error Bounds with Application to Mean Escape Time Computation*](https://arxiv.org/abs/2607.19167) by Nathanael Tepakbong, Jun Fan, Xiang Zhou, and Ding-Xuan Zhou.
 
-The examples compare a standard PINN, three exact-boundary ansatzes, and a variational PINN with Nitsche boundary terms. The mean escape time notebooks retain the equations, loss terms, Monte Carlo data construction, adaptive weights, architectures, optimization schedules, and error measures used for the paper experiments.
+The paper studies when exact enforcement of a Dirichlet boundary condition permits an $H^2$ error bound for a physics-informed neural network. The notebooks compare the boundary-adapted construction with a standard PINN, two other boundary factors, and a variational PINN. They show the problem, losses, training settings, and reference calculation alongside the code that runs them.
 
-## Notebook order
+## Start with a notebook
 
-| Open | Problem | What it shows |
-|---|---|---|
-| 1. [Periodic committor](https://colab.research.google.com/github/n2pakbong/boundary-adapted-pinns/blob/main/colab/periodic_committor.ipynb) | Hitting probability on a periodic two-well domain | The most complete run, checkpoint, resume, and reporting workflow. Start here for the software workflow. |
-| 2. [OU mean escape time](https://colab.research.google.com/github/n2pakbong/boundary-adapted-pinns/blob/main/experiments/mean_escape_time/ou_ball/ou_mean_escape_time.ipynb) | Ornstein–Uhlenbeck process in a disk | The five paper methods against a known radial reference solution. |
-| 3. [Double-well mean escape time](https://colab.research.google.com/github/n2pakbong/boundary-adapted-pinns/blob/main/experiments/mean_escape_time/double_well/double_well_mean_escape_time.ipynb) | Anisotropic diffusion in a double-well potential | The five paper methods against a finite-element reference. |
-| 4. [Duffing mean escape time](https://colab.research.google.com/github/n2pakbong/boundary-adapted-pinns/blob/main/experiments/first_passage/duffing_oscillator/duffing_mean_escape_time.ipynb) | Stochastic Duffing oscillator in a disk | One boundary-adapted PINN, sample trajectories, and a Monte Carlo reference. |
+Each link opens in Colab. Select a CPU or GPU runtime before running the setup cell; results save to Google Drive by default.
 
-Each notebook is self-contained: the mathematical problem, editable settings, method definitions, progress output, saved files, evaluation, and references are in the notebook. The ready-to-run default is the committor notebook's shallow two-hidden-layer, width-64 `tanh` network. The visible model class or factory can be replaced by any scalar-output PyTorch architecture; it is not restricted to a preset menu. Use **Runtime → Change runtime type** in Colab before running setup. The `quick` setting checks the complete workflow with small counts; `paper` restores the recorded OU and double-well settings, while `full` restores the Duffing source architecture and training schedule. These runs are computationally expensive. The setup cells mount Google Drive by default so labels and checkpoints persist; set `SAVE_TO_DRIVE = False` to use temporary runtime storage.
+| Notebook | Problem | Best use |
+| --- | --- | --- |
+| [OU mean escape time](https://colab.research.google.com/github/n2pakbong/boundary-adapted-pinns/blob/main/experiments/mean_escape_time/ou_ball/ou_mean_escape_time.ipynb) | Exit time from a disk, with an analytical reference | Follow the paper's five-method mean escape time comparison. |
+| [Periodic committor](https://colab.research.google.com/github/n2pakbong/boundary-adapted-pinns/blob/main/colab/periodic_committor.ipynb) | Probability of reaching one well before another on a periodic domain | See the prepare, train, checkpoint, resume, and evaluate workflow. |
+| [Double-well mean escape time](https://colab.research.google.com/github/n2pakbong/boundary-adapted-pinns/blob/main/experiments/mean_escape_time/double_well/double_well_mean_escape_time.ipynb) | Exit time with anisotropic diffusion and a numerical reference | Explore the second mean escape time example from the posted paper. |
+| [Duffing mean escape time](https://colab.research.google.com/github/n2pakbong/boundary-adapted-pinns/blob/main/experiments/first_passage/duffing_oscillator/duffing_mean_escape_time.ipynb) | Exit time for a stochastic oscillator | Run an additional single-method example. |
 
-## Results and reproducibility
+The [committor experiment guide](experiments/committor/periodic_two_well/README.md) explains its domain, boundary factors, losses, saved files, and error metrics. The currently posted arXiv version reports the OU and double-well mean escape time experiments; the periodic committor is an additional repository example.
 
-The OU and double-well notebooks display the aggregate error and training-loss values retained from the original paper runs. Those values are historical outputs, not results produced by the reorganized notebooks. They predate the checkpoint-selection and variational array-shape corrections; the double-well values also predate the corrected ellipse arclength weights. Rerun the paper-scale configurations in Colab before replacing or extending the reported tables. The Duffing notebook has no bundled trained result and makes no reproduction claim.
+## Run locally
 
-The double-well notebook replaces the original FEniCS reference cell with a pure-Python `scikit-fem` implementation of the same weak problem. This removes the system-level FEniCS dependency. Existing paper values remain labeled as FEniCS-era outputs until the experiment is rerun.
-
-## Local package and checks
-
-Reusable periodic-committor, OU-disk, and single-trajectory code lives under `src/boundary_pinn/`. The trajectory helpers cover the OU, double-well, and Duffing systems and can be reused for explanatory plots. For a local CPU environment:
+With Python 3.10 or newer, install the package and run its CPU checks:
 
 ```bash
 python -m pip install -e '.[dev]'
 pytest -q
 ```
 
-GitHub Actions performs CPU unit tests, notebook JSON and syntax checks, and tiny end-to-end executions of the three mean-escape-time notebooks. These checks exercise the code paths with reduced counts; they do not reproduce the numerical experiments.
+The implementation lives in [src/boundary_pinn](src/boundary_pinn/), the notebooks and configurations in [experiments](experiments/) and [colab](colab/), and the checks in [tests](tests/). The Colab notebooks expose the model, sampler, optimizer, and schedule as ordinary Python code.
 
-## References
+## Reading the results
 
-The notebooks cite the accompanying paper and the numerical sources used for their methods and reference calculations. Machine-readable entries are collected in [`references.bib`](references.bib).
+The OU and double-well notebooks display aggregate values retained from the original paper runs. Those historical values were not regenerated by the reorganized notebooks. They predate corrections to checkpoint selection and a variational array shape; the double-well values also predate corrected ellipse arclength weights. The notebooks' quick runs and GitHub Actions checks test the workflow, not the paper's numerical accuracy.
 
-## License
+The committor notebook records its resolved configuration, finite-difference reference, Monte Carlo labels, training log, best checkpoint, and evaluated errors in each dated Drive folder. A full notebook execution draws fresh training and Monte Carlo seeds. Run the seed settings and configuration cells for each new replicate; the seeds used are saved in that run's configuration.
 
-MIT; see [`LICENSE`](LICENSE).
+## Citation and license
+
+GitHub's **Cite this repository** link uses [CITATION.cff](CITATION.cff) to cite the [arXiv paper](https://doi.org/10.48550/arXiv.2607.19167). The code is available under the [MIT license](LICENSE).
+
+**Last updated: 2026-10-14 02:25 +08:00.**

@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+message: "If you use this code, please cite the accompanying paper."
+title: "Boundary-adapted PINNs for elliptic Dirichlet problems"
+type: software
+authors:
+  - family-names: Tepakbong
+    given-names: Nathanael
+  - family-names: Fan
+    given-names: Jun
+  - family-names: Zhou
+    given-names: Xiang
+  - family-names: Zhou
+    given-names: Ding-Xuan
+url: "https://github.com/n2pakbong/boundary-adapted-pinns"
+preferred-citation:
+  type: article
+  authors:
+    - family-names: Tepakbong
+      given-names: Nathanael
+    - family-names: Fan
+      given-names: Jun
+    - family-names: Zhou
+      given-names: Xiang
+    - family-names: Zhou
+      given-names: Ding-Xuan
+  title: "Boundary-Adapted PINNs for Elliptic Dirichlet Problems: H^2(Omega) A Priori Error Bounds with Application to Mean Escape Time Computation"
+  year: 2026
+  doi: "10.48550/arXiv.2607.19167"
+  url: "https://arxiv.org/abs/2607.19167"
