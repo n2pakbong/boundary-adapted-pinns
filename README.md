@@ -26,6 +26,7 @@ To cite the method or results, cite the [paper on arXiv](https://arxiv.org/abs/2
 ```
 
 </details>
+
 ## The problem and the method
 
 The paper considers second-order uniformly elliptic Dirichlet problems. Given an operator $\mathscr L$, forcing $f$, and boundary data $g$, the goal is to find $u^\star$ such that
@@ -42,6 +43,7 @@ $$
 where $g$ extends the boundary data into the domain, $\rho$ vanishes on the boundary, and $v_\theta$ is a neural network. This construction makes $u_\theta=g$ on $\partial\Omega$ for every choice of network parameters.
 
 The paper proves a priori $H^2(\Omega)$ error bounds. The $H^2$ norm measures error in the solution and its first and second derivatives.
+
 ## Notebooks
 
 | Example | What it computes |
@@ -74,4 +76,4 @@ The base package installs with `python -m pip install -e .`. Tests check code be
 
 The code is released under the [MIT license](LICENSE).
 
-**Last updated: 2026-10-14 03:19 +08:00.**
+**Last updated: 2026-10-14 03:20 +08:00.**
