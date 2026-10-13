@@ -42,15 +42,14 @@ python -m pip install -e '.[dev]'
 pytest -q
 ```
 
-The repository is organized around:
-
-```text
-src/boundary_pinn/       shared PyTorch models, training, and experiment code
-experiments/             paper examples, settings, and experiment-specific material
-colab/                   Colab workflows, including the periodic committor
-tests/                   automated checks
-CITATION.cff             software citation metadata
-```
+| Location | Purpose |
+| --- | --- |
+| [`src/boundary_pinn/`](src/boundary_pinn/) | Shared PyTorch implementation and experiment code. |
+| [`experiments/mean_escape_time/`](experiments/mean_escape_time/) | The paper's OU and double-well experiments. |
+| [`experiments/committor/`](experiments/committor/) and [`colab/`](colab/) | The added periodic-committor experiment, guide, and notebook. |
+| [`experiments/first_passage/`](experiments/first_passage/) | The added Duffing example. |
+| [`tests/`](tests/) | Automated checks. |
+| [`CITATION.cff`](CITATION.cff) · [`LICENSE`](LICENSE) | Software citation metadata and MIT license. |
 
 The shared package is the starting point for reuse. Problem geometry, sampling, and settings still live with each experiment, so adapt the notebook and experiment code closest to your problem. The [committor guide](experiments/committor/periodic_two_well/README.md) walks through one example and links its main implementation files.
 
@@ -62,4 +61,4 @@ A full periodic-committor run draws fresh training and Monte Carlo seeds and rec
 
 The code is distributed under the [MIT license](LICENSE).
 
-**Last updated: 2026-10-14 02:53 +08:00.**
+**Last updated: 2026-10-14 02:55 +08:00.**
