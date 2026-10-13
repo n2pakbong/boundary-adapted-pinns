@@ -24,15 +24,19 @@ To cite the software, use GitHub's **Cite this repository** link from [CITATION.
 
 ## The mathematical problem
 
-For a diffusion $dX_t=b(X_t)\,dt+\sigma(X_t)\,dW_t$ in a domain $\Omega$, let $\tau_\Omega$ be the first time the process leaves $\Omega$. Its mean escape time is $\tau(x)=\mathbb E_x[\tau_\Omega]$. It solves the elliptic boundary-value problem
+For a diffusion
 $$
-\mathcal L\tau=-1\quad\text{in }\Omega,\qquad \tau=0\quad\text{on }\partial\Omega,
+dX_t=b(X_t)\,dt+\sigma(X_t)\,dW_t,
 $$
-Here $b$ is the drift, $\sigma$ is the diffusion matrix, and $W_t$ is standard Brownian motion. The generator is
-$
+in a domain $\Omega$, $b$ is the drift, $\sigma$ is the diffusion matrix, and $W_t$ is standard Brownian motion. Its generator acts on a smooth function $f$ by
+$$
 \mathcal L f(x)=\sum_i b_i(x)\partial_i f(x)+\frac12\sum_{i,j}(\sigma\sigma^\top)_{ij}(x)\partial_{ij}f(x).
-$
-See the [paper](https://arxiv.org/html/2607.19167) for its assumptions and full error bounds.
+$$
+If $\tau_\Omega=\inf\{t\geq0:X_t\notin\Omega\}$ is the first exit time, the mean escape time is $\tau(x)=\mathbb E_x[\tau_\Omega]$. It solves
+$$
+\mathcal L\tau=-1\quad\text{in }\Omega,\qquad \tau=0\quad\text{on }\partial\Omega.
+$$
+See the [paper](https://arxiv.org/html/2607.19167) for the assumptions and full error bounds.
 
 A boundary-adapted network represents the approximation as
 $$
@@ -40,7 +44,7 @@ $$
 $$
 where $N_\theta$ is a neural network and $\rho$ is a smooth approximation of distance to the boundary. Since $\rho=0$ on $\partial\Omega$, the boundary value is satisfied exactly. The paper shows that vanishing on the boundary is not enough for its $H^2$ error theory: the distance factor must also be normalized so its inward normal derivative is one, $\partial_\nu\rho=1$. Here $\nu$ is the inward unit normal. This normalization keeps $\tau/\rho$ smooth up to the boundary under the paper's regularity assumptions. The theorem bounds minimizers of the sampled residual objective; it does not show that a training optimizer reaches one.
 
-The mean-escape-time notebooks compare a standard PINN with a boundary penalty, the adapted factor $\rho$, stronger and weaker factors $\rho^{3/2}$ and $\rho^{1/2}$, and a variational PINN whose weak Nitsche loss imposes the boundary condition variationally. Their reported relative errors have the form
+The mean-escape-time notebooks compare a standard PINN with a boundary penalty, the adapted factor $\rho$, stronger and weaker factors $\rho^{3/2}$ and $\rho^{1/2}$, and a variational PINN that imposes the boundary data through boundary terms in a weak formulation. Their reported relative errors have the form
 $$
 E_{H^k}=\frac{\|\tau_\theta-\tau_{\mathrm{ref}}\|_{H^k(\Omega)}}{\|\tau_{\mathrm{ref}}\|_{H^k(\Omega)}},\qquad k=0,1,2,
 $$
