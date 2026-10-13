@@ -6,7 +6,6 @@ This repository pairs a mathematical paper with PyTorch code and runnable notebo
 
 **Start:** [math and method](#the-mathematical-problem) · [notebooks](#notebooks) · [code map](#where-to-find-things) · [run locally](#run-locally) · [citation](#citation)
 
-
 ## Citation
 
 For academic work using the method or results, cite the paper:
@@ -29,19 +28,23 @@ For a diffusion $dX_t=b(X_t)\,dt+\sigma(X_t)\,dW_t$ in a domain $\Omega$, let $\
 $$
 \mathcal L\tau=-1\quad\text{in }\Omega,\qquad \tau=0\quad\text{on }\partial\Omega,
 $$
-where $\mathcal L$ is the diffusion generator. See the [paper](https://arxiv.org/html/2607.19167) for its assumptions and full error bounds.
+Here $b$ is the drift, $\sigma$ is the diffusion matrix, and $W_t$ is standard Brownian motion. The generator is
+$
+\mathcal L f(x)=\sum_i b_i(x)\partial_i f(x)+\frac12\sum_{i,j}(\sigma\sigma^\top)_{ij}(x)\partial_{ij}f(x).
+$
+See the [paper](https://arxiv.org/html/2607.19167) for its assumptions and full error bounds.
 
 A boundary-adapted network represents the approximation as
 $$
 \tau_\theta(x)=\rho(x)N_\theta(x),
 $$
-where $N_\theta$ is a neural network and $\rho$ is a smooth approximation of distance to the boundary. Since $\rho=0$ on $\partial\Omega$, the boundary value is satisfied exactly. The paper shows that vanishing on the boundary is not enough for its $H^2$ error theory: the distance factor must also be normalized so its inward normal derivative is one, $\partial_\nu\rho=1$. That normalization keeps the quotient $\tau/\rho$ smooth up to the boundary under the paper's regularity assumptions. The resulting bounds concern empirical risk minimizers; they do not prove that a particular optimizer reaches one.
+where $N_\theta$ is a neural network and $\rho$ is a smooth approximation of distance to the boundary. Since $\rho=0$ on $\partial\Omega$, the boundary value is satisfied exactly. The paper shows that vanishing on the boundary is not enough for its $H^2$ error theory: the distance factor must also be normalized so its inward normal derivative is one, $\partial_\nu\rho=1$. Here $\nu$ is the inward unit normal. This normalization keeps $\tau/\rho$ smooth up to the boundary under the paper's regularity assumptions. The theorem bounds minimizers of the sampled residual objective; it does not show that a training optimizer reaches one.
 
-The mean-escape-time notebooks compare a standard PINN with a boundary penalty, the adapted factor $\rho$, stronger and weaker factors $\rho^{3/2}$ and $\rho^{1/2}$, and a variational PINN using a weak Nitsche formulation. Their reported relative errors have the form
+The mean-escape-time notebooks compare a standard PINN with a boundary penalty, the adapted factor $\rho$, stronger and weaker factors $\rho^{3/2}$ and $\rho^{1/2}$, and a variational PINN whose weak Nitsche loss imposes the boundary condition variationally. Their reported relative errors have the form
 $$
 E_{H^k}=\frac{\|\tau_\theta-\tau_{\mathrm{ref}}\|_{H^k(\Omega)}}{\|\tau_{\mathrm{ref}}\|_{H^k(\Omega)}},\qquad k=0,1,2,
 $$
-so the $H^2$ comparison includes second-derivative error as well as solution error. The OU example uses an analytical reference; the double-well example uses a numerical reference.
+Here $\tau_{\mathrm{ref}}$ is the reference solution and $k=0$ gives the $L^2$ error. The $H^2$ comparison also measures second-derivative error. The OU example uses an analytical reference; the double-well example uses a numerical reference.
 
 ## Notebooks
 
