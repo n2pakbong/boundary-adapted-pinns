@@ -28,22 +28,20 @@ To cite the method or results, cite the [paper on arXiv](https://arxiv.org/abs/2
 </details>
 ## The problem and the method
 
-The paper studies second-order uniformly elliptic Dirichlet problems. Under its regularity assumptions, the target solution $u^\star$ satisfies
+The paper considers second-order uniformly elliptic Dirichlet problems. Given an operator $\mathscr L$, forcing $f$, and boundary data $g$, the goal is to find $u^\star$ such that
 $$
 \begin{cases}
 \mathscr L u^\star=f & \text{in }\Omega,\\
 u^\star=g & \text{on }\partial\Omega.
 \end{cases}
 $$
-Here $\Omega$ is the domain, $f$ is the forcing term, and $g$ prescribes the boundary values. A PINN fits the equation by minimizing its residual $\mathscr L u_\theta-f$ at sampled points in $\Omega$.
-
-The boundary-adapted trial function is
+A PINN approximates $u^\star$ by minimizing the equation's residual at sampled points. The boundary-adapted trial function is
 $$
 u_\theta(x)=g(x)+\rho(x)v_\theta(x),
 $$
-where $g$ is extended smoothly into the domain, $v_\theta$ is a neural network, and the smooth distance approximation $\rho$ vanishes on $\partial\Omega$. Thus $u_\theta=g$ on the boundary for every choice of network parameters.
+where $g$ extends the boundary data into the domain, $\rho$ vanishes on the boundary, and $v_\theta$ is a neural network. This construction makes $u_\theta=g$ on $\partial\Omega$ for every choice of network parameters.
 
-For the paper's $H^2$ error bounds, the first inward normal derivative of $\rho$ must be positive on the boundary: $\partial_\nu\rho(q)>0$ for $q\in\partial\Omega$. This first-order normalization makes $(u^\star-g)/\rho$ smooth up to the boundary under the paper's assumptions. The $H^2$ norm measures error in the solution and its first and second derivatives. The bounds concern the sampled residual minimization problem; they do not guarantee that a training optimizer reaches a minimizer. See the [paper](https://arxiv.org/html/2607.19167) for the precise assumptions and rates.
+The paper proves a priori $H^2(\Omega)$ error bounds. The $H^2$ norm measures error in the solution and its first and second derivatives.
 ## Notebooks
 
 | Example | What it computes |
