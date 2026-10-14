@@ -11,7 +11,7 @@ This repository contains the code and experiment notebooks for our work on bound
 If you use the method or the experiments, please cite the paper:
 
 ```bibtex
-@misc{TepakbongEtAl2026BoundaryAdaptedPINNs,
+@misc{tepakbong2026boundary,
   author = {Tepakbong, Nathanael and Fan, Jun and Zhou, Xiang and Zhou, Ding-Xuan},
   title = {{Boundary-Adapted PINNs for Elliptic Dirichlet Problems: $H^2(\Omega)$ A Priori Error Bounds with Application to Mean Escape Time Computation}},
   year = {2026},
