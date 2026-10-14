@@ -1,19 +1,19 @@
-# Boundary-adapted PINNs for elliptic Dirichlet problems
+# Boundary-Adapted PINNs for Elliptic Dirichlet Problems
 
 [![arXiv:2607.19167](https://img.shields.io/badge/arXiv-2607.19167-b31b1b.svg)](https://arxiv.org/abs/2607.19167) [![Tests](https://github.com/n2pakbong/boundary-adapted-pinns/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/n2pakbong/boundary-adapted-pinns/actions/workflows/tests.yml) [![MIT license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-This repository accompanies work on boundary-adapted physics-informed neural networks (PINNs) for second-order uniformly elliptic Dirichlet problems. The paper proves a priori $H^2(\Omega)$ error bounds, and the code and notebooks illustrate the method on mean escape time and a periodic committor.
+This repository contains the code and experiment notebooks for our work on boundary-adapted physics-informed neural networks (PINNs). The paper studies second-order uniformly elliptic Dirichlet problems, proves a priori error bounds in (H^2(\Omega)), and tests the method on mean escape time problems.
 
-**Start here:** [the equations and method](#the-problem-and-the-method) · [notebooks](#notebooks) · [how the code is organized](#how-the-code-is-organized) · [run locally](#run-locally) · [citation](#citation)
+**Paper:** [arXiv:2607.19167](https://arxiv.org/abs/2607.19167) · [DOI: 10.48550/arXiv.2607.19167](https://doi.org/10.48550/arXiv.2607.19167)
 
 ## Citation
 
-To cite this paper, copy this BibTeX entry into your bibliography:
+If you use the method or the experiments, please cite the paper:
 
 ```bibtex
-@misc{tepakbong2026boundaryadapted,
-  title = {{Boundary-Adapted PINNs for Elliptic Dirichlet Problems: $H^2(\Omega)$ A Priori Error Bounds with Application to Mean Escape Time Computation}},
+@misc{TepakbongEtAl2026BoundaryAdaptedPINNs,
   author = {Tepakbong, Nathanael and Fan, Jun and Zhou, Xiang and Zhou, Ding-Xuan},
+  title = {{Boundary-Adapted PINNs for Elliptic Dirichlet Problems: $H^2(\Omega)$ A Priori Error Bounds with Application to Mean Escape Time Computation}},
   year = {2026},
   eprint = {2607.19167},
   archivePrefix = {arXiv},
@@ -23,54 +23,58 @@ To cite this paper, copy this BibTeX entry into your bibliography:
 }
 ```
 
-## The problem and the method
+## The mathematical idea
 
-The paper considers second-order uniformly elliptic Dirichlet problems. Given an operator $\mathscr L$, forcing $f$, and boundary data $g$, the goal is to find $u^\star$ such that
+A Dirichlet problem asks for a function (u) that solves an equation inside a domain and takes prescribed values on its boundary:
 
-```math
+$$
 \begin{cases}
-\mathscr L u^\star=f & \text{in }\Omega,\\
-u^\star=g & \text{on }\partial\Omega.
+\mathscr L u=f & \text{in }\Omega,\\
+u=g & \text{on }\partial\Omega.
 \end{cases}
-```
+$$
 
-A PINN approximates $u^\star$ by minimizing the equation's residual at sampled points. The boundary-adapted trial function is
+A PINN represents (u) with a neural network and trains it to reduce the equation's residual at sampled points. The boundary-adapted form used in the paper is
 
-```math
-u_\theta(x)=g(x)+\rho(x)v_\theta(x).
-```
+$$
+u_\theta(x)=G(x)+\rho(x)v_\theta(x),
+\qquad G=g \text{ on }\partial\Omega,\quad \rho=0 \text{ on }\partial\Omega.
+$$
 
-Here $g$ extends the boundary data into the domain, $\rho$ vanishes on the boundary, and $v_\theta$ is a neural network. This makes $u_\theta=g$ on $\partial\Omega$ for every choice of network parameters.
+Here (G) extends the boundary data into the domain, (\rho) vanishes on the boundary, and (v_\theta) is a neural network. Thus the boundary values hold for every (\theta). The paper studies how the choice of (\rho) affects approximation and (H^2(\Omega)) error bounds.
 
-The paper proves a priori $H^2(\Omega)$ error bounds. The $H^2$ norm measures error in the solution and its first and second derivatives.
+## Start with an example
 
-## Notebooks
+Each example has a guide beside its notebook or configuration. The guide explains the problem, how the reference is computed, and where the results are saved.
 
-| Example | What it computes |
-| --- | --- |
-| [OU mean escape time](experiments/mean_escape_time/ou_ball/ou_mean_escape_time.ipynb) · [Open in Colab](https://colab.research.google.com/github/n2pakbong/boundary-adapted-pinns/blob/main/experiments/mean_escape_time/ou_ball/ou_mean_escape_time.ipynb) | Mean exit time from a disk, with an analytical reference. |
-| [Double-well mean escape time](experiments/mean_escape_time/double_well/double_well_mean_escape_time.ipynb) · [Open in Colab](https://colab.research.google.com/github/n2pakbong/boundary-adapted-pinns/blob/main/experiments/mean_escape_time/double_well/double_well_mean_escape_time.ipynb) | Anisotropic diffusion, with a numerical reference. |
-| [Periodic committor](colab/periodic_committor.ipynb) · [Open in Colab](https://colab.research.google.com/github/n2pakbong/boundary-adapted-pinns/blob/main/colab/periodic_committor.ipynb) · [Guide](experiments/committor/periodic_two_well/README.md) | Probability of reaching one target before another on a periodic domain. |
-| [Duffing first passage](experiments/first_passage/duffing_oscillator/duffing_mean_escape_time.ipynb) | First-passage time for a stochastic oscillator. |
+| Example | What it computes | Start here |
+| --- | --- | --- |
+| Ornstein–Uhlenbeck mean escape time | Expected exit time from a disk, compared with an analytic solution. | [Guide](experiments/mean_escape_time/ou_ball/README.md) · [Notebook](experiments/mean_escape_time/ou_ball/ou_mean_escape_time.ipynb) · [Open in Colab](https://colab.research.google.com/github/n2pakbong/boundary-adapted-pinns/blob/main/experiments/mean_escape_time/ou_ball/ou_mean_escape_time.ipynb) |
+| Double-well mean escape time | Mean exit time for an anisotropic diffusion, with a finite-element reference. | [Guide](experiments/mean_escape_time/double_well/README.md) · [Notebook](experiments/mean_escape_time/double_well/double_well_mean_escape_time.ipynb) · [Open in Colab](https://colab.research.google.com/github/n2pakbong/boundary-adapted-pinns/blob/main/experiments/mean_escape_time/double_well/double_well_mean_escape_time.ipynb) |
+| Periodic two-well committor | Probability of reaching target (B) before target (A), with Monte Carlo labels and a finite-difference reference. | [Guide](experiments/committor/periodic_two_well/README.md) · [Notebook](colab/periodic_committor.ipynb) · [Open in Colab](https://colab.research.google.com/github/n2pakbong/boundary-adapted-pinns/blob/main/colab/periodic_committor.ipynb) |
+| Duffing oscillator first passage | A stochastic first-passage example with trajectory simulation and a PINN. | [Guide](experiments/first_passage/duffing_oscillator/README.md) · [Notebook](experiments/first_passage/duffing_oscillator/duffing_mean_escape_time.ipynb) |
+| OU disk package example | A small CPU check of the problem and command-line runner. | [Guide and configuration](experiments/mean_escape_time/ou_disk/README.md) |
 
-In Colab, select a CPU or GPU runtime and run the setup cells. The notebooks save outputs to Google Drive by default.
+## Find and adapt the code
 
-## How the code is organized
+The reusable Python package is in `src/boundary_pinn/`. Its problem modules define the differential operator, domain and boundary geometry, samplers, and—where available—a reference solution. Training modules define the trial functions and losses. Experiment modules prepare shared data, run method comparisons, evaluate errors, and save results.
 
-The reusable implementation is under `src/boundary_pinn/`: problem modules define the differential operator, geometry, boundary sampling, and reference solution; experiment modules prepare data, train models, and evaluate comparisons. The `experiments/` directory puts each problem's notebook, settings, and explanatory guide together. The `colab/` directory contains the periodic-committor entry notebook. Tests live in `tests/`.
+The `experiments/` directory groups notebooks, guides, and settings by problem. The `colab/` directory contains the periodic committor notebook. The `tests/` directory checks core calculations and notebook structure; the tests do not run the full GPU experiments or establish their numerical accuracy.
 
-For a full example of how these pieces connect, follow the [periodic committor guide](experiments/committor/periodic_two_well/README.md) to its [problem definition](src/boundary_pinn/problems/committor/periodic_two_well.py), [training methods](src/boundary_pinn/problems/committor/training.py), and [comparison runner](src/boundary_pinn/experiments/committor/periodic_two_well/comparison.py). For a mean-escape-time run, start with the [OU guide](experiments/mean_escape_time/ou_ball/README.md) beside its notebook.
+To adapt the code to another PDE, start with the closest problem module: define its operator and geometry, then implement its interior and boundary samplers. Add a reference solver if reference-based errors are needed, and connect the problem to an experiment runner. Existing JSON configurations change settings for supported problems; they do not define a new PDE or geometry by themselves. The [periodic committor guide](experiments/committor/periodic_two_well/README.md) traces one problem from its equation through training and saved results.
 
-To adapt the code to a new PDE, start from the closest problem module and update its operator, domain, and boundary samplers, then connect it to an experiment runner. Add a reference solution if you need reference-based error metrics. The [committor guide](experiments/committor/periodic_two_well/README.md) follows these pieces through one working example; changing a settings file alone does not add support for a new geometry or equation.
+For Colab runs, choose the runtime before running setup, then follow the cells in order. The guides describe each notebook's save and resume options; for long runs, use its documented persistent-output setting and keep the printed run folder with the results.
 
 ## Run locally
 
-Use Python 3.10 or newer. Install the notebook and test dependencies, then run the CPU checks:
+Use Python 3.10 or newer:
 
-    python -m pip install -e ".[dev,notebooks]"
-    python -m pytest -q
+```bash
+python -m pip install -e ".[dev,notebooks]"
+python -m pytest -q
+```
 
-The base package installs with `python -m pip install -e .`. Tests check code behavior; they do not run full experiments or establish numerical accuracy.
+The `notebooks` extra provides `scikit-fem` for the finite-element reference. For the base package, use `python -m pip install -e .`. The test suite is a CPU check, not a substitute for running or validating a full experiment.
 
 ## License
 
