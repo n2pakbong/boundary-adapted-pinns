@@ -8,6 +8,7 @@ import subprocess
 import time
 from collections.abc import Callable
 from datetime import datetime, timezone
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -70,6 +71,35 @@ def _hook_name(function: Callable[..., Any] | None, default: str) -> str:
     if function is None:
         return default
     return f"{function.__module__}.{function.__qualname__}"
+
+
+def _fixed_training_data_fingerprint(data: dict[str, Any] | None) -> str | None:
+    """Hash the exact point and quadrature arrays used by every training epoch."""
+    if data is None:
+        return None
+    digest = hashlib.sha256()
+
+    def update(name: str, value: Any) -> None:
+        digest.update(name.encode("utf-8"))
+        if isinstance(value, dict):
+            for key in sorted(value):
+                update(str(key), value[key])
+        elif isinstance(value, (tuple, list)):
+            for index, item in enumerate(value):
+                update(str(index), item)
+        elif isinstance(value, torch.Tensor):
+            array = value.detach().cpu().contiguous().numpy()
+            digest.update(str(array.dtype).encode("ascii"))
+            digest.update(repr(array.shape).encode("ascii"))
+            digest.update(array.tobytes())
+        else:
+            array = np.ascontiguousarray(np.asarray(value))
+            digest.update(str(array.dtype).encode("ascii"))
+            digest.update(repr(array.shape).encode("ascii"))
+            digest.update(array.tobytes())
+
+    update("root", data)
+    return digest.hexdigest()
 
 
 def _write_run_manifest(
@@ -250,19 +280,30 @@ def _boundary_rmse(
     device: torch.device,
     dtype: torch.dtype,
     points_per_boundary: int = 512,
+    fixed_boundary_data: dict[str, Any] | None = None,
 ) -> dict[str, float]:
-    """Evaluate Dirichlet errors on the two actual level-set boundaries."""
-    generator = torch.Generator(device="cpu").manual_seed(0)
+    """Evaluate boundary errors on the run's saved evaluation quadrature."""
+    generator = None
     model.eval()
     with torch.no_grad():
-        source, _, source_weights = sample_boundary_geometry(
-            problem, "source", points_per_boundary, device=torch.device("cpu"),
-            dtype=dtype, generator=generator,
+        source_sample = None if fixed_boundary_data is None else fixed_boundary_data.get(
+            "source_evaluation_boundary", fixed_boundary_data.get("source_boundary")
         )
-        target, _, target_weights = sample_boundary_geometry(
-            problem, "target", points_per_boundary, device=torch.device("cpu"),
-            dtype=dtype, generator=generator,
+        target_sample = None if fixed_boundary_data is None else fixed_boundary_data.get(
+            "target_evaluation_boundary", fixed_boundary_data.get("target_boundary")
         )
+        if source_sample is None:
+            source_sample = sample_boundary_geometry(
+                problem, "source", points_per_boundary, device=torch.device("cpu"),
+                dtype=dtype, generator=generator,
+            )
+        if target_sample is None:
+            target_sample = sample_boundary_geometry(
+                problem, "target", points_per_boundary, device=torch.device("cpu"),
+                dtype=dtype, generator=generator,
+            )
+        source, _, source_weights = source_sample
+        target, _, target_weights = target_sample
         source = source.to(device)
         target = target.to(device)
         source_weights = source_weights.to(device)
@@ -887,6 +928,7 @@ def run_periodic_comparison(
     optimizer_factory: OptimizerFactory | None = None,
     scheduler_factory: SchedulerFactory | None = None,
     training_step: TrainingStep | None = None,
+    fixed_training_data: dict[str, Any] | None = None,
 ) -> None:
     """Prepare numerical references and run the configured neural comparisons.
 
@@ -1052,6 +1094,14 @@ def run_periodic_comparison(
         "scheduler": _callable_fingerprint(scheduler_factory),
         "training_step": _callable_fingerprint(training_step),
     }
+    fixed_data_fingerprint = _fixed_training_data_fingerprint(fixed_training_data)
+    saved_fixed_data_fingerprint = metadata.get("fixed_training_data_sha256")
+    if resume and saved_fixed_data_fingerprint != fixed_data_fingerprint:
+        raise RuntimeError(
+            "The fixed training point arrays differ from the interrupted run. "
+            "Restore its saved training_points.npz or start a new run folder."
+        )
+    metadata["fixed_training_data_sha256"] = fixed_data_fingerprint
     metadata.setdefault("training_started_utc", now)
     metadata["git_revision"] = revision
     if resume:
@@ -1069,15 +1119,22 @@ def run_periodic_comparison(
     summary: dict[str, Any] = {
         "reference_grid_sizes": grid_sizes,
         "reference_convergence": fd_diagnostics,
+        "method_seeds": {},
         "methods": {},
     }
 
     print(f"GPU/CPU phase 3/3: training {len(methods)} configured methods on {requested_device}.", flush=True)
+    method_seeds = {
+        method: (int(raw["seed"]) + method_index) % (2**32)
+        for method_index, method in enumerate(methods)
+    }
+    metadata["method_seeds"] = method_seeds
+    write_json(metadata_path, metadata)
     for method in methods:
         run_directory = output_dir / method
         method_directories[method] = run_directory
         config = PeriodicCommittorConfig(
-            seed=int(raw["seed"]),
+            seed=method_seeds[method],
             device=str(raw["device"]),
             dtype=str(raw["dtype"]),
             method=method,
@@ -1097,6 +1154,8 @@ def run_periodic_comparison(
             optimizer_factory=optimizer_factory,
             scheduler_factory=scheduler_factory,
             training_step=training_step,
+            fixed_training_data=fixed_training_data,
+            area_seed=int(raw["seed"]),
         )
         model = _build_periodic_committor_model(
             config, problem, model_factory
@@ -1105,13 +1164,15 @@ def run_periodic_comparison(
         model.load_state_dict(checkpoint["model_state"])
         prediction = _evaluate(model, reference, device=requested_device, dtype=dtype, batch_size=batch_size)
         method_summary = {
+            "training_seed": int(config.seed),
             "best_epoch": int(checkpoint["epoch"]),
             "best_training_objective": float(checkpoint["best_loss"]),
             "best_training_loss": float(checkpoint["best_loss"]),
             "final_training_metrics": final_training_metrics,
             **periodic_reference_errors(prediction, reference),
-            **_boundary_rmse(model, problem, device=requested_device, dtype=dtype),
+            **_boundary_rmse(model, problem, device=requested_device, dtype=dtype, fixed_boundary_data=fixed_training_data),
         }
+        summary["method_seeds"][method] = int(config.seed)
         summary["methods"][method] = method_summary
         predictions[method] = prediction
         _save_evaluation_arrays(output_dir, reference, predictions)
@@ -1220,6 +1281,17 @@ def evaluate_saved_models(
     metadata = json.loads(metadata_path.read_text(encoding="utf-8")) if metadata_path.is_file() else {}
     methods: dict[str, dict[str, Any]] = {}
     predictions: dict[str, np.ndarray] = {}
+    fixed_boundary_data = None
+    point_archive = output_dir / "training_points.npz"
+    if point_archive.is_file():
+        with np.load(point_archive, allow_pickle=False) as saved_points:
+            fixed_boundary_data = {}
+            for which in ("source", "target"):
+                prefix = f"{which}_evaluation_boundary"
+                fixed_boundary_data[prefix] = tuple(
+                    torch.as_tensor(saved_points[f"{prefix}_{suffix}"])
+                    for suffix in ("points", "normals", "weights")
+                )
 
     for method in raw["methods"]:
         method_metadata_path = output_dir / method / "metadata.json"
@@ -1264,7 +1336,7 @@ def evaluate_saved_models(
             "best_training_objective": float(checkpoint["best_loss"]),
             "final_training_metrics": _saved_final_training_metrics(output_dir / method),
             **periodic_reference_errors(prediction, reference),
-            **_boundary_rmse(model, problem, device=device, dtype=dtype),
+            **_boundary_rmse(model, problem, device=device, dtype=dtype, fixed_boundary_data=fixed_boundary_data),
         }
         print(f"Evaluated {method} checkpoint against FDM reference on CPU.", flush=True)
 

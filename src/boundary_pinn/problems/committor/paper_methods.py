@@ -251,13 +251,22 @@ def sample_boundary_geometry(
 
 
 def estimate_domain_area(
-    problem: PeriodicTwoWellCommittor, *, device: torch.device, dtype: torch.dtype
+    problem: PeriodicTwoWellCommittor,
+    *,
+    device: torch.device,
+    dtype: torch.dtype,
+    points: int = 4096,
+    seed: int | None = None,
 ) -> float:
-    """Estimate |D| from deterministic periodic-boundary quadrature."""
+    """Estimate |D| by periodic-boundary quadrature with a caller-supplied budget."""
 
-    n = 4096
+    if points < 1:
+        raise ValueError("area quadrature needs at least one point")
+    n = int(points)
     areas = []
-    generator = torch.Generator(device=device).manual_seed(2026)
+    generator = None
+    if seed is not None:
+        generator = torch.Generator(device=device).manual_seed(int(seed))
     for which, center in (("source", problem.source_center), ("target", problem.target_center)):
         points, _, _ = sample_boundary_geometry(
             problem, which, n, device=device, dtype=dtype, generator=generator
@@ -284,6 +293,7 @@ def nitsche_committor_losses(
     length_scale: float,
     gamma: float,
     h: float,
+    boundary_samples: dict[str, tuple[torch.Tensor, torch.Tensor, torch.Tensor]] | None = None,
 ) -> tuple[dict[str, torch.Tensor], dict[str, torch.Tensor]]:
     """Evaluate paper-aligned interior-plus-flux and Nitsche boundary loss components.
 
@@ -307,9 +317,19 @@ def nitsche_committor_losses(
     consistency = torch.zeros_like(volume)
     penalty = torch.zeros_like(volume)
     for which, value in (("source", 0.0), ("target", 1.0)):
-        xb, normal, weights = sample_boundary_geometry(
-            problem, which, boundary_points, device=x.device, dtype=x.dtype
-        )
+        if boundary_samples is None:
+            xb, normal, weights = sample_boundary_geometry(
+                problem, which, boundary_points, device=x.device, dtype=x.dtype
+            )
+        else:
+            xb, normal, weights = boundary_samples[which]
+            xb = xb.to(device=x.device, dtype=x.dtype)
+            normal = normal.to(device=x.device, dtype=x.dtype)
+            weights = weights.to(device=x.device, dtype=x.dtype)
+            if xb.shape != (boundary_points, 2) or normal.shape != (boundary_points, 2):
+                raise ValueError(f"fixed {which} boundary data has the wrong point count")
+            if weights.shape != (boundary_points,):
+                raise ValueError(f"fixed {which} boundary weights have the wrong point count")
         xb = xb.detach().clone().requires_grad_(True)
         qb = model(xb).reshape(-1)
         grad_qb = torch.autograd.grad(qb.sum(), xb, create_graph=True)[0]

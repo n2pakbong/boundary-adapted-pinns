@@ -678,6 +678,7 @@ def test_five_paper_methods_report_every_final_loss_component_on_cpu(tmp_path, m
             "nitsche": {
                 "volume_points": 8, "test_functions": 2, "boundary_points": 4,
                 "length_scale": 0.15, "gamma": 10.0, "h": 0.1,
+                "area_points": 64,
             },
         },
         "reference_grid_sizes": [32, 64],
@@ -693,12 +694,60 @@ def test_five_paper_methods_report_every_final_loss_component_on_cpu(tmp_path, m
     assert (output_dir / "monte_carlo_labels.npz").is_file()
     assert not (output_dir / "simple_pinn").exists()
 
+    from boundary_pinn.problems.committor.paper_methods import sample_boundary_geometry
+    from boundary_pinn.problems.committor import training as training_module
+    from boundary_pinn.problems.committor import paper_methods as paper_methods_module
+
+    problem = PeriodicTwoWellCommittor(**config["problem"])
+    torch.manual_seed(123)
+    fixed_training_data = {
+        "collocation_points": sample_interior_points(
+            problem, 8, device="cpu", dtype=torch.float64
+        ),
+        "nitsche_volume_points": sample_interior_points(
+            problem, 8, device="cpu", dtype=torch.float64
+        ),
+        "nitsche_test_centers": sample_interior_points(
+            problem, 2, device="cpu", dtype=torch.float64
+        ),
+        "source_boundary": sample_boundary_geometry(
+            problem, "source", 4, device="cpu", dtype=torch.float64
+        ),
+        "target_boundary": sample_boundary_geometry(
+            problem, "target", 4, device="cpu", dtype=torch.float64
+        ),
+    }
+
+    def unexpected_training_sampling(*_args, **_kwargs):
+        pytest.fail("the fixed training arrays should be reused, not resampled")
+
+    monkeypatch.setattr(training_module, "sample_interior_points", unexpected_training_sampling)
+    monkeypatch.setattr(training_module, "sample_boundary_geometry", unexpected_training_sampling)
+    area_boundary_calls = []
+    original_area_boundary_sampler = paper_methods_module.sample_boundary_geometry
+
+    def track_area_quadrature(problem, which, *args, **kwargs):
+        area_boundary_calls.append(which)
+        return original_area_boundary_sampler(problem, which, *args, **kwargs)
+
+    monkeypatch.setattr(paper_methods_module, "sample_boundary_geometry", track_area_quadrature)
+
     def unexpected_cpu_preparation(*_args, **_kwargs):
         pytest.fail("prepared GPU stage must reuse the CPU reference and labels")
 
     monkeypatch.setattr(comparison, "_reference_convergence", unexpected_cpu_preparation)
     monkeypatch.setattr(comparison, "generate_committor_mc_data", unexpected_cpu_preparation)
-    comparison.run_periodic_comparison(config_path, output_dir, train_prepared=True)
+    comparison.run_periodic_comparison(
+        config_path, output_dir, train_prepared=True,
+        fixed_training_data=fixed_training_data,
+    )
+
+    assert area_boundary_calls == ["source", "target"]
+    comparison_metadata = json.loads(
+        (output_dir / "comparison_metadata.json").read_text(encoding="utf-8")
+    )
+    assert comparison_metadata["fixed_training_data_sha256"]
+    assert len(set(comparison_metadata["method_seeds"].values())) == len(methods)
 
     summary = json.loads((output_dir / "summary.json").read_text(encoding="utf-8"))
     assert set(summary["methods"]) == set(methods)

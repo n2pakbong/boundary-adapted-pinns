@@ -370,13 +370,66 @@ def _boundary_mse(
     *,
     device: torch.device,
     dtype: torch.dtype,
+    fixed_sample: tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None = None,
 ) -> torch.Tensor:
-    """Monte Carlo boundary MSE with arclength quadrature weights."""
-    points, _, weights = sample_boundary_geometry(
-        problem, which, n, device=device, dtype=dtype
-    )
+    """Boundary MSE using saved quadrature points when the caller provides them."""
+    if fixed_sample is None:
+        points, _, weights = sample_boundary_geometry(
+            problem, which, n, device=device, dtype=dtype
+        )
+    else:
+        points, _, weights = fixed_sample
+    points = points.to(device=device, dtype=dtype)
+    weights = weights.to(device=device, dtype=dtype)
     squared_error = (model(points) - target_value).square()
     return (weights * squared_error).sum() / weights.sum()
+
+
+def _fixed_point_set(
+    data: Mapping[str, Any],
+    name: str,
+    count: int,
+    *,
+    device: torch.device,
+    dtype: torch.dtype,
+) -> torch.Tensor | None:
+    value = data.get(name)
+    if value is None:
+        return None
+    points = torch.as_tensor(value, device=device, dtype=dtype)
+    if points.shape != (count, 2):
+        raise ValueError(
+            f"fixed training data {name!r} must have shape ({count}, 2); "
+            f"got {tuple(points.shape)}"
+        )
+    return points
+
+
+def _fixed_boundary_sample(
+    data: Mapping[str, Any],
+    name: str,
+    count: int,
+    *,
+    device: torch.device,
+    dtype: torch.dtype,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor] | None:
+    value = data.get(name)
+    if value is None:
+        return None
+    if not isinstance(value, (tuple, list)) or len(value) != 3:
+        raise ValueError(
+            f"fixed training data {name!r} must contain points, normals, and weights"
+        )
+    points, normals, weights = (
+        torch.as_tensor(item, device=device, dtype=dtype) for item in value
+    )
+    expected = (count, 2)
+    if points.shape != expected or normals.shape != expected or weights.shape != (count,):
+        raise ValueError(
+            f"fixed boundary data {name!r} must have shapes {expected}, "
+            f"{expected}, and ({count},)"
+        )
+    return points, normals, weights
 
 
 def _truncate_metrics_to_epoch(metrics_path: Path, checkpoint_epoch: int) -> None:
@@ -408,6 +461,8 @@ def run_periodic_committor(
     optimizer_factory: OptimizerFactory | None = None,
     scheduler_factory: SchedulerFactory | None = None,
     training_step: TrainingStep | None = None,
+    fixed_training_data: Mapping[str, Any] | None = None,
+    area_seed: int | None = None,
 ) -> dict[str, Any]:
     """Run or resume one periodic committor method comparison.
 
@@ -422,6 +477,10 @@ def run_periodic_committor(
     dtype, and sampler as keyword arguments. Return a mapping with a finite
     scalar ``objective``, optional scalar diagnostics, and optionally the
     boolean ``stop_training`` to stop after a durable checkpoint.
+
+    When ``fixed_training_data`` is supplied, its collocation, boundary, and
+    Nitsche point arrays are reused across epochs. Their exact contents are
+    fingerprinted in run metadata so resume rejects changed point sets.
     """
 
     requested_device = torch.device(config.device)
@@ -576,6 +635,38 @@ def run_periodic_committor(
     epochs = int(config.training["epochs"])
     collocation_points = int(config.training["collocation_points"])
     boundary_points = int(config.training.get("boundary_points", collocation_points // 4))
+    fixed_data = fixed_training_data or {}
+    fixed_collocation = _fixed_point_set(
+        fixed_data, "collocation_points", collocation_points,
+        device=requested_device, dtype=dtype,
+    )
+    fixed_source_boundary = _fixed_boundary_sample(
+        fixed_data, "source_boundary", boundary_points,
+        device=requested_device, dtype=dtype,
+    )
+    fixed_target_boundary = _fixed_boundary_sample(
+        fixed_data, "target_boundary", boundary_points,
+        device=requested_device, dtype=dtype,
+    )
+    nitsche = config.training.get("nitsche", {})
+    fixed_volume = _fixed_point_set(
+        fixed_data, "nitsche_volume_points", int(nitsche.get("volume_points", 0)),
+        device=requested_device, dtype=dtype,
+    ) if int(nitsche.get("volume_points", 0)) > 0 else None
+    fixed_test_centers = _fixed_point_set(
+        fixed_data, "nitsche_test_centers", int(nitsche.get("test_functions", 0)),
+        device=requested_device, dtype=dtype,
+    ) if int(nitsche.get("test_functions", 0)) > 0 else None
+    if fixed_training_data is not None and fixed_collocation is None:
+        raise ValueError("fixed training data must include collocation_points")
+    if fixed_training_data is not None and config.method in ("simple_pinn", "penalty"):
+        if fixed_source_boundary is None or fixed_target_boundary is None:
+            raise ValueError("fixed training data for a boundary-penalty method must include both boundary sets")
+    if fixed_training_data is not None and config.method == "variational_nitsche":
+        if fixed_volume is None or fixed_test_centers is None:
+            raise ValueError("fixed training data for Variational/Nitsche must include its volume points and test centers")
+        if fixed_source_boundary is None or fixed_target_boundary is None:
+            raise ValueError("fixed training data for Variational/Nitsche must include both boundary sets")
     boundary_weight = float(config.training.get("boundary_weight", 100.0))
     checkpoint_every = int(config.training.get("checkpoint_every", 100))
     log_interval_seconds = float(config.training.get("log_interval_seconds", 30.0))
@@ -596,7 +687,13 @@ def run_periodic_committor(
         mc_x = mc_data.anchors.to(device=requested_device, dtype=dtype)
         mc_y = mc_data.values.to(device=requested_device, dtype=dtype)
     area = (
-        estimate_domain_area(problem, device=requested_device, dtype=dtype)
+        estimate_domain_area(
+            problem,
+            device=requested_device,
+            dtype=dtype,
+            points=int(config.training.get("nitsche", {}).get("area_points", 4096)),
+            seed=config.seed if area_seed is None else area_seed,
+        )
         if uses_paper_objective and config.method == "variational_nitsche"
         else 0.0
     )
@@ -671,20 +768,30 @@ def run_periodic_committor(
                     )
             elif uses_paper_objective and config.method == "variational_nitsche":
                 weak = config.training["nitsche"]
-                volume_points = sample_interior_points(
-                    problem,
-                    int(weak["volume_points"]),
-                    device=requested_device,
-                    dtype=dtype,
-                    sampler=interior_sampler,
-                )
-                test_centers = sample_interior_points(
-                    problem,
-                    int(weak["test_functions"]),
-                    device=requested_device,
-                    dtype=dtype,
-                    sampler=interior_sampler,
-                )
+                volume_points = fixed_volume
+                if volume_points is None:
+                    volume_points = sample_interior_points(
+                        problem,
+                        int(weak["volume_points"]),
+                        device=requested_device,
+                        dtype=dtype,
+                        sampler=interior_sampler,
+                    )
+                test_centers = fixed_test_centers
+                if test_centers is None:
+                    test_centers = sample_interior_points(
+                        problem,
+                        int(weak["test_functions"]),
+                        device=requested_device,
+                        dtype=dtype,
+                        sampler=interior_sampler,
+                    )
+                boundary_samples = None
+                if fixed_source_boundary is not None and fixed_target_boundary is not None:
+                    boundary_samples = {
+                        "source": fixed_source_boundary,
+                        "target": fixed_target_boundary,
+                    }
                 _, weak_losses = nitsche_committor_losses(
                     model,
                     problem,
@@ -695,6 +802,7 @@ def run_periodic_committor(
                     length_scale=float(weak["length_scale"]),
                     gamma=float(weak["gamma"]),
                     h=float(weak["h"]),
+                    boundary_samples=boundary_samples,
                 )
                 losses["pde_loss"] = weak_losses["pde_loss"]
                 losses["boundary_loss"] = weak_losses["boundary_loss"]
@@ -703,13 +811,15 @@ def run_periodic_committor(
                 })
                 losses["data_loss"] = (model(mc_x) - mc_y).square().mean()
             else:
-                x = sample_interior_points(
-                    problem,
-                    collocation_points,
-                    device=requested_device,
-                    dtype=dtype,
-                    sampler=interior_sampler,
-                )
+                x = fixed_collocation
+                if x is None:
+                    x = sample_interior_points(
+                        problem,
+                        collocation_points,
+                        device=requested_device,
+                        dtype=dtype,
+                        sampler=interior_sampler,
+                    )
                 residual = problem.residual(model, x)
                 pde_loss = residual.square().mean()
                 if uses_paper_objective:
@@ -720,10 +830,12 @@ def run_periodic_committor(
                             _boundary_mse(
                                 model, problem, "source", 0.0, boundary_points,
                                 device=requested_device, dtype=dtype,
+                                fixed_sample=fixed_source_boundary,
                             )
                             + _boundary_mse(
                                 model, problem, "target", 1.0, boundary_points,
                                 device=requested_device, dtype=dtype,
+                                fixed_sample=fixed_target_boundary,
                             )
                         )
                 else:
@@ -733,10 +845,12 @@ def run_periodic_committor(
                             _boundary_mse(
                                 model, problem, "source", 0.0, boundary_points,
                                 device=requested_device, dtype=dtype,
+                                fixed_sample=fixed_source_boundary,
                             )
                             + _boundary_mse(
                                 model, problem, "target", 1.0, boundary_points,
                                 device=requested_device, dtype=dtype,
+                                fixed_sample=fixed_target_boundary,
                             )
                         )
                     losses["pde_loss"] = pde_loss
