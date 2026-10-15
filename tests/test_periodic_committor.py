@@ -678,7 +678,6 @@ def test_five_paper_methods_report_every_final_loss_component_on_cpu(tmp_path, m
             "nitsche": {
                 "volume_points": 8, "test_functions": 2, "boundary_points": 4,
                 "length_scale": 0.15, "gamma": 10.0, "h": 0.1,
-                "area_points": 64,
             },
         },
         "reference_grid_sizes": [32, 64],
