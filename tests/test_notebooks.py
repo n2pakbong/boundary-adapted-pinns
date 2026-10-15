@@ -53,6 +53,7 @@ def test_new_notebook_runs_draw_fresh_seeds_and_unique_folders():
     committor = sources["periodic_committor.ipynb"]
     assert "SEED = secrets.randbelow(2**31)" in committor
     assert "MONTE_CARLO_SEED = secrets.randbelow(2**31)" in committor
+    assert "NITSCHE_AREA_POINTS" not in committor
     assert "secrets.token_hex(4)" in committor and "exist_ok=False" in committor
 
     ou = sources["ou_mean_escape_time.ipynb"]
