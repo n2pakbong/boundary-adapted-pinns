@@ -322,8 +322,21 @@ def test_periodic_comparison_cpu_smoke(tmp_path, capsys) -> None:
     assert (output_dir / "summary.json").is_file()
     summary = json.loads((output_dir / "summary.json").read_text(encoding="utf-8"))
     metadata = json.loads((output_dir / "comparison_metadata.json").read_text(encoding="utf-8"))
+    manifest = json.loads((output_dir / "run_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["schema_version"] == 2
+    assert manifest["run_id"] == output_dir.name
+    assert manifest["status"] == "complete"
+    assert "evaluation_arrays.npz" in manifest["artifacts"]
     assert "git_revision" in metadata
     assert set(summary["methods"]) == set(config["methods"])
+    assert summary["signed_error_plot_limits"][0] == -summary["signed_error_plot_limits"][1]
+    with np.load(output_dir / "evaluation_arrays.npz", allow_pickle=False) as arrays:
+        assert set(arrays["method_names"].tolist()) == set(config["methods"])
+        assert {f"prediction__{method}" for method in config["methods"]} <= set(arrays.files)
+        assert {f"signed_error__{method}" for method in config["methods"]} <= set(arrays.files)
+        assert arrays["signed_error_plot_limits"].tolist() == pytest.approx(
+            summary["signed_error_plot_limits"]
+        )
 
 
 def test_comparison_accepts_plain_pytorch_model_sampler_optimizer_and_scheduler(
@@ -350,6 +363,7 @@ def test_comparison_accepts_plain_pytorch_model_sampler_optimizer_and_scheduler(
     sampler_calls = []
     optimizer_calls = []
     scheduler_calls = []
+    training_step_calls = []
 
     def make_model():
         model = UserPeriodicNet()
@@ -372,6 +386,21 @@ def test_comparison_accepts_plain_pytorch_model_sampler_optimizer_and_scheduler(
     def make_scheduler(optimizer):
         scheduler_calls.append(True)
         return torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.9)
+
+    def custom_training_step(
+        *, model, problem, config, epoch, optimizer, scheduler, loss_scales,
+        mc_data, device, dtype, interior_sampler,
+    ):
+        training_step_calls.append((config.method, epoch))
+        points = interior_sampler(
+            problem, 8, device=device, dtype=dtype
+        )
+        objective = problem.residual(model, points).square().mean()
+        optimizer.zero_grad(set_to_none=True)
+        objective.backward()
+        optimizer.step()
+        scheduler.step()
+        return {"objective": objective.detach(), "custom_residual_loss": objective.detach()}
 
     config = {
         "seed": 7,
@@ -410,15 +439,32 @@ def test_comparison_accepts_plain_pytorch_model_sampler_optimizer_and_scheduler(
         interior_sampler=sample_points,
         optimizer_factory=make_optimizer,
         scheduler_factory=make_scheduler,
+        training_step=custom_training_step,
     )
 
     assert sampler_calls
     assert optimizer_calls == [True] * len(config["methods"])
     assert scheduler_calls == [True] * len(config["methods"])
+    assert training_step_calls == [(method, 1) for method in config["methods"]]
     assert (output_dir / "simple_pinn" / "best.pt").is_file()
     metadata = json.loads((output_dir / "simple_pinn" / "metadata.json").read_text())
     assert metadata["runtime_hooks"]["model"].endswith("make_model")
     assert metadata["runtime_hook_fingerprints"]["model"]
+    assert metadata["runtime_hooks"]["training_step"].endswith("custom_training_step")
+    assert metadata["runtime_hook_fingerprints"]["training_step"]
+    for method in config["methods"]:
+        rows = [
+            json.loads(line)
+            for line in (output_dir / method / "metrics.jsonl").read_text().splitlines()
+            if line.strip()
+        ]
+        assert rows[-1]["custom_residual_loss"] >= 0.0
+        final = json.loads(
+            (output_dir / method / "final_training_metrics.json").read_text()
+        )
+        assert final["final_epoch_metrics"]["custom_residual_loss"] == pytest.approx(
+            rows[-1]["custom_residual_loss"]
+        )
     assert metadata["runtime_hooks"]["interior_sampler"].endswith("sample_points")
     for method in config["methods"]:
         assert (output_dir / method / "last.pt").is_file()
@@ -436,6 +482,8 @@ def test_comparison_accepts_plain_pytorch_model_sampler_optimizer_and_scheduler(
     assert evaluation_path.name == "saved_model_evaluation.json"
     assert evaluation["training_git_revision"] == "test-revision"
     assert set(evaluation["methods"]) == set(config["methods"])
+    assert (output_dir / "evaluation_arrays.npz").is_file()
+    assert all((output_dir / f"committor_{method}.png").is_file() for method in config["methods"])
     for method in config["methods"]:
         assert evaluation["methods"][method]["grid_l2_abs"] >= 0.0
         assert evaluation["methods"][method]["grid_l2_rel"] >= 0.0
@@ -931,6 +979,64 @@ def test_wall_clock_controls_console_only_and_metrics_keep_every_epoch(tmp_path,
     assert "epoch 1/3" in output
     assert "epoch 2/3" not in output
     assert "epoch 3/3" in output
+
+
+def test_custom_training_step_can_stop_after_a_durable_epoch(tmp_path) -> None:
+    import json
+
+    from boundary_pinn.problems.committor.training import (
+        PeriodicCommittorConfig,
+        run_periodic_committor,
+    )
+
+    def stop_after_two_epochs(
+        *, model, problem, config, epoch, optimizer, scheduler, loss_scales,
+        mc_data, device, dtype, interior_sampler,
+    ):
+        points = problem.sample_interior(8, device=device, dtype=dtype)
+        objective = problem.residual(model, points).square().mean()
+        optimizer.zero_grad(set_to_none=True)
+        objective.backward()
+        optimizer.step()
+        scheduler.step()
+        return {
+            "objective": objective.detach(),
+            "stop_training": epoch == 2,
+        }
+
+    config = PeriodicCommittorConfig(
+        seed=11,
+        device="cpu",
+        dtype="float64",
+        method="boundary_adapted",
+        problem={
+            "a": 1.0,
+            "b": 0.6,
+            "epsilon": 0.4,
+            "source_center": [0.25, 0.0],
+            "target_center": [0.75, 0.0],
+            "set_radius": 0.5,
+        },
+        model={"width": 4, "depth": 1, "activation": "tanh"},
+        training={
+            "epochs": 5,
+            "collocation_points": 8,
+            "learning_rate": 1e-3,
+            "checkpoint_every": 5,
+            "log_interval_seconds": 3600,
+        },
+    )
+    run_dir = tmp_path / "early_stop"
+    run_periodic_committor(config, run_dir, training_step=stop_after_two_epochs)
+    records = [
+        json.loads(line)
+        for line in (run_dir / "metrics.jsonl").read_text().splitlines()
+        if line.strip()
+    ]
+    checkpoint = torch.load(run_dir / "last.pt", map_location="cpu", weights_only=False)
+    assert [row["epoch"] for row in records] == [1, 2]
+    assert records[-1]["stop_training"] is True
+    assert checkpoint["epoch"] == 2
 
 
 def test_comparison_settings_reject_silent_or_incomplete_controls() -> None:

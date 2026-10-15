@@ -9,7 +9,7 @@ import types
 import platform
 import random
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -42,6 +42,7 @@ LEGACY_METHODS = ("naive_product", "penalty")
 ModelFactory = Callable[[], torch.nn.Module]
 OptimizerFactory = Callable[[list[torch.nn.Parameter]], torch.optim.Optimizer]
 SchedulerFactory = Callable[[torch.optim.Optimizer], Any]
+TrainingStep = Callable[..., Mapping[str, Any]]
 
 
 def _callable_name(function: Callable[..., Any] | None, default: str) -> str:
@@ -406,6 +407,7 @@ def run_periodic_committor(
     interior_sampler: InteriorSampler | None = None,
     optimizer_factory: OptimizerFactory | None = None,
     scheduler_factory: SchedulerFactory | None = None,
+    training_step: TrainingStep | None = None,
 ) -> dict[str, Any]:
     """Run or resume one periodic committor method comparison.
 
@@ -413,6 +415,13 @@ def run_periodic_committor(
     formulations, including pointwise committor labels.  Configurations from
     the earlier three-method exploratory run retain their original objectives
     when that section is absent, so existing checkpoints remain resumable.
+
+    If supplied, ``training_step`` replaces the built-in per-epoch update and
+    owns optimizer and scheduler stepping. It receives the model, problem,
+    config, epoch, optimizer, scheduler, loss scales, Monte Carlo data, device,
+    dtype, and sampler as keyword arguments. Return a mapping with a finite
+    scalar ``objective``, optional scalar diagnostics, and optionally the
+    boolean ``stop_training`` to stop after a durable checkpoint.
     """
 
     requested_device = torch.device(config.device)
@@ -437,12 +446,14 @@ def run_periodic_committor(
         ),
         "optimizer": _callable_name(optimizer_factory, "repository optimizer builder"),
         "scheduler": _callable_name(scheduler_factory, "repository scheduler builder"),
+        "training_step": _callable_name(training_step, "repository training step"),
     }
     runtime_hook_fingerprints = {
         "model": _callable_fingerprint(model_factory),
         "interior_sampler": _callable_fingerprint(interior_sampler),
         "optimizer": _callable_fingerprint(optimizer_factory),
         "scheduler": _callable_fingerprint(scheduler_factory),
+        "training_step": _callable_fingerprint(training_step),
     }
     if resume and metadata_path.exists():
         prior_metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
@@ -453,13 +464,18 @@ def run_periodic_committor(
                 f"{prior_version!r}, but the selected method now uses {objective_version!r}. "
                 "Start a new run folder; the old checkpoint was not resumed."
             )
-        if prior_metadata.get("runtime_hooks", runtime_hooks) != runtime_hooks:
+        prior_hooks = dict(prior_metadata.get("runtime_hooks", runtime_hooks))
+        prior_hooks.setdefault("training_step", "repository training step")
+        if prior_hooks != runtime_hooks:
             raise RuntimeError(
                 "The model, sampler, optimizer, or scheduler used for this resume "
                 "does not match the saved run. Restore the original notebook code "
                 "or start a new output folder."
             )
         prior_fingerprints = prior_metadata.get("runtime_hook_fingerprints")
+        if prior_fingerprints is not None:
+            prior_fingerprints = dict(prior_fingerprints)
+            prior_fingerprints.setdefault("training_step", None)
         if (
             prior_fingerprints is not None
             and prior_fingerprints != runtime_hook_fingerprints
@@ -591,8 +607,69 @@ def run_periodic_committor(
         for epoch in range(start_epoch, epochs + 1):
             model.train()
             losses: dict[str, torch.Tensor] = {}
+            weighted: dict[str, torch.Tensor] = {}
             diagnostics: dict[str, torch.Tensor] = {}
-            if uses_paper_objective and config.method == "variational_nitsche":
+            custom_metrics: dict[str, Any] = {}
+            stop_after_epoch = False
+            if training_step is not None:
+                # This hook owns the full update for one epoch. It can perform
+                # zero, one, or several optimizer/scheduler steps and return
+                # any scalar diagnostics needed for the saved history.
+                result = training_step(
+                    model=model,
+                    problem=problem,
+                    config=config,
+                    epoch=epoch,
+                    optimizer=optimizer,
+                    scheduler=scheduler,
+                    loss_scales=loss_scales,
+                    mc_data=mc_data,
+                    device=requested_device,
+                    dtype=dtype,
+                    interior_sampler=interior_sampler,
+                )
+                if not isinstance(result, Mapping) or "objective" not in result:
+                    raise TypeError(
+                        "training_step must return a mapping with a scalar 'objective' "
+                        "and optional scalar metrics. The callback performs its own updates."
+                    )
+
+                def scalar_metric(name: str, value: Any) -> float:
+                    if isinstance(value, torch.Tensor):
+                        if value.numel() != 1:
+                            raise ValueError(f"training_step metric {name!r} must be scalar")
+                        numeric = float(value.detach().cpu())
+                    elif isinstance(value, (int, float, np.number)):
+                        numeric = float(value)
+                    else:
+                        raise TypeError(
+                            f"training_step metric {name!r} must be a scalar number or tensor"
+                        )
+                    if not np.isfinite(numeric):
+                        raise ValueError(f"training_step metric {name!r} is not finite")
+                    return numeric
+
+                loss_value = scalar_metric("objective", result["objective"])
+                stop_value = result.get("stop_training", False)
+                if not isinstance(stop_value, (bool, np.bool_)):
+                    raise TypeError("training_step 'stop_training' must be a boolean")
+                stop_after_epoch = bool(stop_value)
+                reserved = {
+                    "epoch", "loss", "objective", "learning_rate",
+                    "session_elapsed_seconds", "session_epochs_per_second",
+                    "estimated_remaining_seconds", "stop_training",
+                }
+                custom_metrics = {
+                    str(name): scalar_metric(str(name), value)
+                    for name, value in result.items()
+                    if name not in {"objective", "stop_training"}
+                }
+                conflicts = reserved.intersection(custom_metrics)
+                if conflicts:
+                    raise ValueError(
+                        f"training_step cannot replace reserved history fields: {sorted(conflicts)}"
+                    )
+            elif uses_paper_objective and config.method == "variational_nitsche":
                 weak = config.training["nitsche"]
                 volume_points = sample_interior_points(
                     problem,
@@ -665,33 +742,36 @@ def run_periodic_committor(
                     losses["pde_loss"] = pde_loss
                     losses["boundary_loss"] = boundary_loss
 
-            if loss_scales is not None:
-                weighted = {
-                    f"weighted_{name}": torch.exp(-2.0 * loss_scales[name]) * value
-                    for name, value in losses.items()
-                }
-                objective = sum(weighted.values()) + sum(loss_scales.values())
-            else:
-                objective = losses["pde_loss"] + boundary_weight * losses["boundary_loss"]
-                weighted = {
-                    "weighted_pde_loss": losses["pde_loss"],
-                    "weighted_boundary_loss": boundary_weight * losses["boundary_loss"],
-                }
-            optimizer.zero_grad(set_to_none=True)
-            objective.backward()
-            optimizer.step()
-            scheduler.step()
-
-            loss_value = float(objective.detach().cpu())
+            if training_step is None:
+                if loss_scales is not None:
+                    weighted = {
+                        f"weighted_{name}": torch.exp(-2.0 * loss_scales[name]) * value
+                        for name, value in losses.items()
+                    }
+                    objective = sum(weighted.values()) + sum(loss_scales.values())
+                else:
+                    objective = losses["pde_loss"] + boundary_weight * losses["boundary_loss"]
+                    weighted = {
+                        "weighted_pde_loss": losses["pde_loss"],
+                        "weighted_boundary_loss": boundary_weight * losses["boundary_loss"],
+                    }
+                optimizer.zero_grad(set_to_none=True)
+                objective.backward()
+                optimizer.step()
+                scheduler.step()
+                loss_value = float(objective.detach().cpu())
             record: dict[str, Any] = {
                 "epoch": epoch,
                 "loss": loss_value,
                 "objective": loss_value,
                 "learning_rate": optimizer.param_groups[0]["lr"],
+                **custom_metrics,
                 **{name: float(value.detach().cpu()) for name, value in losses.items()},
                 **{name: float(value.detach().cpu()) for name, value in weighted.items()},
                 **{name: float(value.detach().cpu()) for name, value in diagnostics.items()},
             }
+            if stop_after_epoch:
+                record["stop_training"] = True
             if loss_scales is not None:
                 record["adaptive_loss_weights"] = {
                     name: float(torch.exp(-2.0 * value.detach()).cpu())
@@ -720,7 +800,7 @@ def run_periodic_committor(
                 metrics_file.flush()
                 fields = " | ".join(
                     f"{name}={record[name]:.4g}" for name in record
-                    if name == "objective" or name in losses or name in diagnostics
+                    if name == "objective" or name in losses or name in diagnostics or name in custom_metrics
                 )
                 print(
                     f"{config.method} | epoch {epoch:,}/{epochs:,} | "
@@ -734,7 +814,10 @@ def run_periodic_committor(
                 best_loss = loss_value
                 best_epoch = epoch
                 best_model_state = _cpu_model_state(model)
-            checkpoint_due = epoch == 1 or epoch % checkpoint_every == 0 or epoch == epochs
+            checkpoint_due = (
+                epoch == 1 or epoch % checkpoint_every == 0 or epoch == epochs
+                or stop_after_epoch
+            )
             if checkpoint_due:
                 # Persist progress through each restartable checkpoint.
                 metrics_file.flush()
@@ -760,6 +843,8 @@ def run_periodic_committor(
                         run_dir / "best.pt",
                     )
             final_record = record
+            if stop_after_epoch:
+                break
 
     if final_record is None:
         metric_lines = [line for line in metrics_path.read_text(encoding="utf-8").splitlines() if line]
@@ -767,6 +852,13 @@ def run_periodic_committor(
     final_metrics = {
         "method": config.method,
         "final_epoch": final_record.get("epoch"),
+        "final_epoch_metrics": {
+            key: value for key, value in final_record.items()
+            if key not in {
+                "epoch", "loss", "session_elapsed_seconds",
+                "session_epochs_per_second", "estimated_remaining_seconds",
+            }
+        },
         "best_epoch": best_epoch,
         "best_training_objective": best_loss,
         "final_training_objective": final_record.get("objective", final_record.get("loss")),

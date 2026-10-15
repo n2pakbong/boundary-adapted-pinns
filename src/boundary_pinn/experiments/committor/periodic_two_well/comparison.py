@@ -43,6 +43,7 @@ from ....problems.committor.training import (
     OptimizerFactory,
     run_periodic_committor,
     SchedulerFactory,
+    TrainingStep,
 )
 
 
@@ -69,6 +70,110 @@ def _hook_name(function: Callable[..., Any] | None, default: str) -> str:
     if function is None:
         return default
     return f"{function.__module__}.{function.__qualname__}"
+
+
+def _write_run_manifest(
+    output_dir: Path,
+    config: dict[str, Any],
+    status: str,
+    *,
+    required: list[str] | None = None,
+) -> None:
+    """Refresh a human-readable run state and a complete artifact inventory."""
+    path = output_dir / "run_manifest.json"
+    now = datetime.now(timezone.utc).isoformat()
+    record = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else {
+        "schema_version": 2,
+        "run_id": output_dir.name,
+        "created_utc": now,
+        "config_file": "comparison_config.json",
+        "seed": int(config["seed"]),
+        "monte_carlo_seed": config["training"].get("monte_carlo", {}).get("seed"),
+        "settings": config,
+        "git_revision": _git_revision(),
+    }
+    missing = [name for name in (required or []) if not (output_dir / name).is_file()]
+    if status == "complete" and missing:
+        record["status"] = "incomplete"
+        record["missing_required_artifacts"] = missing
+        record["updated_utc"] = now
+        record["artifacts"] = sorted(
+            str(item.relative_to(output_dir))
+            for item in output_dir.rglob("*")
+            if item.is_file() and item != path and ".tmp" not in item.name
+        )
+        write_json(path, record)
+        raise RuntimeError(
+            "The run cannot be marked complete; required artifacts are missing: "
+            + ", ".join(missing)
+        )
+    record["status"] = status
+    record.pop("missing_required_artifacts", None)
+    if required is not None:
+        record["required_artifacts"] = required
+    record["updated_utc"] = now
+    record["artifacts"] = sorted(
+        str(item.relative_to(output_dir))
+        for item in output_dir.rglob("*")
+        if item.is_file() and item != path and ".tmp" not in item.name
+    )
+    write_json(path, record)
+
+
+def _save_evaluation_arrays(
+    output_dir: Path,
+    reference: PeriodicCommittorReference,
+    predictions: dict[str, np.ndarray],
+    *,
+    error_limit: float | None = None,
+) -> Path:
+    """Save the reference and every evaluated solution/error field for reuse."""
+    arrays: dict[str, np.ndarray] = {
+        "grid": reference.grid,
+        "reference": reference.values,
+        "source_mask": reference.source,
+        "target_mask": reference.target,
+        "domain_mask": reference.domain,
+        "method_names": np.asarray(list(predictions), dtype=np.str_),
+    }
+    for method, prediction in predictions.items():
+        if not np.isfinite(prediction).all():
+            raise ValueError(f"Evaluation prediction for {method} contains non-finite values")
+        error = np.asarray(prediction) - reference.values
+        arrays[f"prediction__{method}"] = prediction
+        arrays[f"signed_error__{method}"] = error
+        arrays[f"absolute_error__{method}"] = np.abs(error)
+    if error_limit is not None:
+        arrays["signed_error_plot_limits"] = np.asarray([-error_limit, error_limit])
+    destination = output_dir / "evaluation_arrays.npz"
+    temporary = destination.with_name(destination.name + ".tmp")
+    try:
+        with temporary.open("wb") as stream:
+            np.savez_compressed(stream, **arrays)
+        temporary.replace(destination)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+    return destination
+
+
+def _shared_error_limit(
+    predictions: dict[str, np.ndarray],
+    reference: np.ndarray,
+    domain: np.ndarray | None = None,
+) -> float:
+    if not predictions:
+        return 1.0e-12
+    mask = np.asarray(domain, dtype=bool) if domain is not None else None
+    return max(
+        1.0e-12,
+        *(
+            float(np.max(np.abs(np.asarray(values) - reference)[mask]))
+            if mask is not None
+            else float(np.max(np.abs(np.asarray(values) - reference)))
+            for values in predictions.values()
+        ),
+    )
 
 
 def _preparation_inputs(config: dict[str, Any]) -> dict[str, Any]:
@@ -171,9 +276,14 @@ def _plot_method(
     prediction: np.ndarray,
     reference: PeriodicCommittorReference,
     destination: Path,
+    *,
+    error_limit: float | None = None,
 ) -> None:
-    error = prediction - reference.values
-    error_limit = max(float(np.max(np.abs(error))), 1.0e-12)
+    error = np.ma.masked_where(
+        ~np.asarray(reference.domain, dtype=bool), prediction - reference.values
+    )
+    if error_limit is None:
+        error_limit = max(float(np.max(np.abs(error))), 1.0e-12)
     panels = ((prediction, "PINN committor", "viridis", 0.0, 1.0),
               (reference.values, "finite-difference reference", "viridis", 0.0, 1.0),
               (error, "PINN minus reference", "coolwarm", -error_limit, error_limit))
@@ -768,6 +878,7 @@ def run_periodic_comparison(
     interior_sampler: InteriorSampler | None = None,
     optimizer_factory: OptimizerFactory | None = None,
     scheduler_factory: SchedulerFactory | None = None,
+    training_step: TrainingStep | None = None,
 ) -> None:
     """Prepare numerical references and run the configured neural comparisons.
 
@@ -838,6 +949,8 @@ def run_periodic_comparison(
     else:
         write_json(config_record, raw)
 
+    _write_run_manifest(output_dir, raw, "preparing")
+
     metadata_path = output_dir / "comparison_metadata.json"
     now = datetime.now(timezone.utc).isoformat()
     if metadata_path.is_file():
@@ -858,6 +971,22 @@ def run_periodic_comparison(
             )
         write_json(metadata_path, metadata)
         _prepare_cpu_artifacts(raw, output_dir, interior_sampler=interior_sampler)
+        preparation = json.loads(
+            (output_dir / "cpu_preparation.json").read_text(encoding="utf-8")
+        )
+        preparation_required = [
+            "comparison_config.json", "preparation_config.json", "cpu_preparation.json",
+            str(preparation["reference_file"]),
+        ]
+        if preparation.get("monte_carlo_file"):
+            preparation_required.extend([
+                str(preparation["monte_carlo_file"]),
+                str(preparation["monte_carlo_metadata_file"]),
+                str(preparation["monte_carlo_plot_file"]),
+            ])
+        _write_run_manifest(
+            output_dir, raw, "prepared", required=preparation_required
+        )
         print(
             "No neural network was trained. The CPU reference and Monte Carlo labels are ready "
             "for the separate GPU training stage.",
@@ -873,6 +1002,8 @@ def run_periodic_comparison(
         reference, fd_diagnostics, shared_mc_data = _prepare_cpu_artifacts(
             raw, output_dir, interior_sampler=interior_sampler
         )
+
+    _write_run_manifest(output_dir, raw, "training")
 
     if train_prepared and not resume:
         preparation_config_path = output_dir / "preparation_config.json"
@@ -904,12 +1035,14 @@ def run_periodic_comparison(
         ),
         "optimizer": _hook_name(optimizer_factory, "repository optimizer builder"),
         "scheduler": _hook_name(scheduler_factory, "repository scheduler builder"),
+        "training_step": _hook_name(training_step, "repository training step"),
     }
     metadata["runtime_hook_fingerprints"] = {
         "model": _callable_fingerprint(model_factory),
         "interior_sampler": _callable_fingerprint(interior_sampler),
         "optimizer": _callable_fingerprint(optimizer_factory),
         "scheduler": _callable_fingerprint(scheduler_factory),
+        "training_step": _callable_fingerprint(training_step),
     }
     metadata.setdefault("training_started_utc", now)
     metadata["git_revision"] = revision
@@ -924,6 +1057,7 @@ def run_periodic_comparison(
     dtype = _dtype(str(raw["dtype"]))
     batch_size = int(raw.get("evaluation_batch_size", 16_384))
     method_directories: dict[str, Path] = {}
+    predictions: dict[str, np.ndarray] = {}
     summary: dict[str, Any] = {
         "reference_grid_sizes": grid_sizes,
         "reference_convergence": fd_diagnostics,
@@ -954,6 +1088,7 @@ def run_periodic_comparison(
             interior_sampler=interior_sampler,
             optimizer_factory=optimizer_factory,
             scheduler_factory=scheduler_factory,
+            training_step=training_step,
         )
         model = _build_periodic_committor_model(
             config, problem, model_factory
@@ -970,12 +1105,65 @@ def run_periodic_comparison(
             **_boundary_rmse(model, problem, device=requested_device, dtype=dtype),
         }
         summary["methods"][method] = method_summary
-        _plot_method(method, prediction, reference, output_dir / f"committor_{method}.png")
+        predictions[method] = prediction
+        _save_evaluation_arrays(output_dir, reference, predictions)
         write_json(output_dir / "summary.json", summary)
+        _write_run_manifest(output_dir, raw, "training")
         print(f"Completed {method}; results saved to {run_directory}.", flush=True)
 
+    error_limit = _shared_error_limit(
+        predictions, reference.values, reference.domain
+    )
+    for method, prediction in predictions.items():
+        _plot_method(
+            method,
+            prediction,
+            reference,
+            output_dir / f"committor_{method}.png",
+            error_limit=error_limit,
+        )
+    summary["signed_error_plot_limits"] = [-error_limit, error_limit]
+    _save_evaluation_arrays(
+        output_dir, reference, predictions, error_limit=error_limit
+    )
     _plot_losses(method_directories, output_dir / "losses.png")
     write_json(output_dir / "summary.json", summary)
+    required = [
+        "comparison_config.json", "comparison_metadata.json", "cpu_preparation.json",
+        "evaluation_arrays.npz", "losses.png", "summary.json",
+    ]
+    preparation = json.loads(preparation_path.read_text(encoding="utf-8"))
+    required.append(str(preparation["reference_file"]))
+    if preparation.get("monte_carlo_file"):
+        required.extend([
+            str(preparation["monte_carlo_file"]),
+            str(preparation["monte_carlo_metadata_file"]),
+            str(preparation["monte_carlo_plot_file"]),
+        ])
+    for method in methods:
+        required.extend([
+            f"{method}/best.pt", f"{method}/last.pt", f"{method}/metrics.jsonl",
+            f"{method}/final_training_metrics.json", f"committor_{method}.png",
+        ])
+    expected_array_keys = {
+        "grid", "reference", "source_mask", "target_mask", "domain_mask",
+        "method_names", "signed_error_plot_limits",
+    }
+    for method in methods:
+        expected_array_keys.update({
+            f"prediction__{method}", f"signed_error__{method}",
+            f"absolute_error__{method}",
+        })
+    with np.load(output_dir / "evaluation_arrays.npz", allow_pickle=False) as arrays:
+        missing_array_keys = expected_array_keys - set(arrays.files)
+        if missing_array_keys:
+            raise RuntimeError(
+                "The result archive is missing required arrays: "
+                + ", ".join(sorted(missing_array_keys))
+            )
+        if set(arrays["method_names"].tolist()) != set(methods):
+            raise RuntimeError("The result archive does not contain every selected method")
+    _write_run_manifest(output_dir, raw, "complete", required=required)
     print(f"Comparison complete: {output_dir}", flush=True)
 
 
@@ -1023,6 +1211,7 @@ def evaluate_saved_models(
     metadata_path = output_dir / "comparison_metadata.json"
     metadata = json.loads(metadata_path.read_text(encoding="utf-8")) if metadata_path.is_file() else {}
     methods: dict[str, dict[str, Any]] = {}
+    predictions: dict[str, np.ndarray] = {}
 
     for method in raw["methods"]:
         method_metadata_path = output_dir / method / "metadata.json"
@@ -1061,6 +1250,7 @@ def evaluate_saved_models(
         prediction = _evaluate(
             model, reference, device=device, dtype=dtype, batch_size=batch_size
         )
+        predictions[method] = prediction
         methods[method] = {
             "best_epoch": int(checkpoint["epoch"]),
             "best_training_objective": float(checkpoint["best_loss"]),
@@ -1069,6 +1259,18 @@ def evaluate_saved_models(
             **_boundary_rmse(model, problem, device=device, dtype=dtype),
         }
         print(f"Evaluated {method} checkpoint against FDM reference on CPU.", flush=True)
+
+    error_limit = _shared_error_limit(
+        predictions, reference.values, reference.domain
+    )
+    _save_evaluation_arrays(
+        output_dir, reference, predictions, error_limit=error_limit
+    )
+    for method, prediction in predictions.items():
+        _plot_method(
+            method, prediction, reference,
+            output_dir / f"committor_{method}.png", error_limit=error_limit,
+        )
 
     destination = output_dir / "saved_model_evaluation.json"
     write_json(destination, {
@@ -1080,6 +1282,7 @@ def evaluate_saved_models(
         "evaluation_git_revision": _git_revision(),
         "reference_file": reference_path.name,
         "reference_grid_size": int(reference.values.shape[0]),
+        "signed_error_plot_limits": [-error_limit, error_limit],
         "norm_convention": (
             "Area-weighted finite-difference Sobolev norms. L2 uses exterior-domain "
             "nodes; H1 uses axial stencils contained in the domain; H2 uses full 3x3 "
@@ -1088,6 +1291,13 @@ def evaluate_saved_models(
         ),
         "methods": methods,
     })
+    manifest_path = output_dir / "run_manifest.json"
+    current_status = (
+        json.loads(manifest_path.read_text(encoding="utf-8")).get("status", "evaluated")
+        if manifest_path.is_file()
+        else "evaluated"
+    )
+    _write_run_manifest(output_dir, raw, current_status)
     print(f"Saved solution-error report: {destination}", flush=True)
     return destination
 

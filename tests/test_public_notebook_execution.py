@@ -1,6 +1,8 @@
 from pathlib import Path
 
+import json
 import nbformat
+import numpy as np
 import pytest
 from nbclient import NotebookClient
 
@@ -28,6 +30,9 @@ REPLACEMENTS = {
     "mc_anchors, mc_paths, mc_dt, mc_max_time = 20, 32, 2e-3, 5.0": "mc_anchors, mc_paths, mc_dt, mc_max_time = 3, 3, 0.02, 0.04",
     "grid_n = 200": "grid_n = 24",
     "grid_n = 180": "grid_n = 24",
+    "reference_grid_n = 200": "reference_grid_n = 24",
+    "evaluation_grid_n = 200": "evaluation_grid_n = 24",
+    "evaluation_grid_n = 180": "evaluation_grid_n = 24",
 }
 
 
@@ -53,3 +58,49 @@ def test_public_notebook_executes_with_tiny_settings(path, tmp_path, monkeypatch
         resources={"metadata": {"path": str(tmp_path)}},
     )
     client.execute()
+
+    if path.name == "ou_mean_escape_time.ipynb":
+        record_path = next(tmp_path.rglob("run_manifest.json"))
+        arrays_path = record_path.parent / "numerical_results.npz"
+        required = {
+            "gx", "gy", "grid_points", "disk_mask", "reference_grid",
+            "monte_carlo_anchors", "monte_carlo_exit_times",
+            "monte_carlo_censored_fraction", "evaluation_interior",
+            "evaluation_boundary", "run_seed",
+        }
+    elif path.name == "double_well_mean_escape_time.ipynb":
+        record_path = next(tmp_path.rglob("run_manifest.json"))
+        arrays_path = record_path.parent / "evaluation" / "fields_and_reference.npz"
+        required = {"gx", "gy", "grid_points", "ellipse_mask", "reference"}
+        with np.load(record_path.parent / "shared_data.npz", allow_pickle=False) as shared:
+            assert {
+                "anchors", "mean_exit_times", "censored_fraction",
+                "evaluation_interior", "evaluation_boundary", "training_seed",
+                "monte_carlo_seed",
+            } <= set(shared.files)
+    else:
+        record_path = next(tmp_path.rglob("run_manifest.json"))
+        arrays_path = record_path.parent / "evaluation_field.npz"
+        required = {
+            "gx", "gy", "points", "mask", "field", "anchors", "prediction",
+            "reference", "censored_fraction", "signed_anchor_error",
+            "absolute_anchor_error",
+        }
+        with np.load(record_path.parent / "training_points.npz", allow_pickle=False) as points:
+            assert {"collocation", "evaluation", "training_seed", "monte_carlo_seed"} <= set(points.files)
+
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    assert record["schema_version"] == 2
+    assert record["status"] == "complete"
+    assert record["run_id"]
+    assert record["created_utc"] and record["updated_utc"]
+    assert "seed" in record and "monte_carlo_seed" in record
+    assert arrays_path.is_file()
+    assert str(arrays_path.relative_to(record_path.parent)) in record["artifacts"]
+    with np.load(arrays_path, allow_pickle=False) as arrays:
+        assert required <= set(arrays.files)
+        if path.name != "duffing_mean_escape_time.ipynb":
+            methods = record.get("methods", record.get("settings", {}).get("methods", []))
+            for method in methods:
+                assert f"prediction_{method}" in arrays.files
+                assert f"signed_error_{method}" in arrays.files

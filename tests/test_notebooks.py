@@ -39,3 +39,28 @@ def test_primary_notebooks_are_valid_json_and_python():
                 ast.parse(source, filename=f"{path}:{index}")
             except SyntaxError as error:
                 raise AssertionError(f"Invalid Python in {path}, cell {index}: {error}") from error
+
+
+def test_new_notebook_runs_draw_fresh_seeds_and_unique_folders():
+    sources = {
+        path.name: "\n".join(
+            python_source(cell)
+            for cell in json.loads(path.read_text(encoding="utf-8"))["cells"]
+            if cell.get("cell_type") == "code"
+        )
+        for path in NOTEBOOKS
+    }
+    committor = sources["periodic_committor.ipynb"]
+    assert "SEED = secrets.randbelow(2**31)" in committor
+    assert "MONTE_CARLO_SEED = secrets.randbelow(2**31)" in committor
+    assert "secrets.token_hex(4)" in committor
+
+    ou = sources["ou_mean_escape_time.ipynb"]
+    assert "SEED = secrets.randbelow(2**32)" in ou
+    assert "secrets.token_hex(4)" in ou
+
+    for filename in ("double_well_mean_escape_time.ipynb", "duffing_mean_escape_time.ipynb"):
+        source = sources[filename]
+        assert "SEED = secrets.randbits(32)" in source
+        assert "MC_SEED = secrets.randbits(32)" in source
+        assert "run_stamp" in source
