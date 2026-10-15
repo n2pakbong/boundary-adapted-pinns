@@ -779,7 +779,7 @@ def _validate_comparison_config(raw: dict[str, Any]) -> None:
         {
             "epochs", "collocation_points", "boundary_points", "boundary_weight",
             "learning_rate", "lr_gamma", "optimizer", "scheduler", "checkpoint_every",
-            "log_interval_seconds", "log_every", "adaptive_loss_log_scale_init",
+            "report_fraction", "log_interval_seconds", "log_every", "adaptive_loss_log_scale_init",
             "monte_carlo", "nitsche",
         },
         "training",
@@ -797,6 +797,10 @@ def _validate_comparison_config(raw: dict[str, Any]) -> None:
         raise ValueError("training.adaptive_loss_log_scale_init must be finite")
     if "log_interval_seconds" in training and float(training["log_interval_seconds"]) <= 0.0:
         raise ValueError("training.log_interval_seconds must be positive")
+    if "report_fraction" in training and not 0.0 < float(training["report_fraction"]) <= 1.0:
+        raise ValueError("training.report_fraction must be in (0, 1]")
+    if "report_fraction" in training and "log_interval_seconds" in training:
+        raise ValueError("Set only training.report_fraction for new runs; wall-clock reporting is for older configs.")
     if "log_interval_seconds" in training and "log_every" in training:
         raise ValueError(
             "Set only training.log_interval_seconds for time-based reports; "

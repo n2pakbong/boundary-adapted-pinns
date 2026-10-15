@@ -669,15 +669,23 @@ def run_periodic_committor(
             raise ValueError("fixed training data for Variational/Nitsche must include both boundary sets")
     boundary_weight = float(config.training.get("boundary_weight", 100.0))
     checkpoint_every = int(config.training.get("checkpoint_every", 100))
-    log_interval_seconds = float(config.training.get("log_interval_seconds", 30.0))
-    if log_interval_seconds <= 0.0:
-        raise ValueError("training.log_interval_seconds must be positive")
-    # Read old configs for already-created runs; new presets use wall-clock reporting.
-    legacy_log_every = (
-        int(config.training["log_every"])
-        if "log_every" in config.training and "log_interval_seconds" not in config.training
-        else None
-    )
+    report_fraction = config.training.get("report_fraction")
+    if report_fraction is not None:
+        report_fraction = float(report_fraction)
+        if not 0.0 < report_fraction <= 1.0:
+            raise ValueError("training.report_fraction must be in (0, 1]")
+        report_every = max(1, int(np.ceil(report_fraction * epochs)))
+        legacy_log_every = None
+    else:
+        # Read older saved runs that used a fixed epoch count or wall-clock interval.
+        log_interval_seconds = float(config.training.get("log_interval_seconds", 30.0))
+        if log_interval_seconds <= 0.0:
+            raise ValueError("training.log_interval_seconds must be positive")
+        legacy_log_every = (
+            int(config.training["log_every"])
+            if "log_every" in config.training and "log_interval_seconds" not in config.training
+            else None
+        )
     metrics_path = run_dir / "metrics.jsonl"
     if resume:
         _truncate_metrics_to_epoch(metrics_path, start_epoch - 1)
@@ -699,7 +707,7 @@ def run_periodic_committor(
     )
     final_record: dict[str, Any] | None = None
     training_started = time.monotonic()
-    next_report_at = training_started
+    next_report_at = training_started  # Used only by older configs with wall-clock reporting.
     with metrics_path.open(metrics_mode, encoding="utf-8") as metrics_file:
         for epoch in range(start_epoch, epochs + 1):
             model.train()
@@ -900,15 +908,18 @@ def run_periodic_committor(
             record["session_epochs_per_second"] = rate
             record["estimated_remaining_seconds"] = remaining_seconds
 
-            if legacy_log_every is not None:
+            if report_fraction is not None:
+                report_due = (
+                    epoch == start_epoch or epoch % report_every == 0 or epoch == epochs
+                )
+            elif legacy_log_every is not None:
                 report_due = (
                     epoch == start_epoch or epoch % legacy_log_every == 0 or epoch == epochs
                 )
             else:
                 report_due = epoch == start_epoch or epoch == epochs or now >= next_report_at
 
-            # Keep every epoch for a full-resolution loss history. The time
-            # interval controls console output only, not the saved metrics.
+            # Keep every epoch in the history; report_fraction controls console output.
             metrics_file.write(json.dumps(record, sort_keys=True) + "\n")
             if report_due:
                 metrics_file.flush()
@@ -922,7 +933,8 @@ def run_periodic_committor(
                     f"ETA {_format_duration(remaining_seconds)} | {fields}",
                     flush=True,
                 )
-                next_report_at = now + log_interval_seconds
+                if report_fraction is None and legacy_log_every is None:
+                    next_report_at = now + log_interval_seconds
 
             if loss_value < best_loss:
                 best_loss = loss_value

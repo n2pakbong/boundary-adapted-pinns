@@ -978,7 +978,7 @@ def test_resume_discards_metrics_after_last_checkpoint(tmp_path) -> None:
     assert [json.loads(line)["epoch"] for line in path.read_text().splitlines()] == [1, 2]
 
 
-def test_wall_clock_controls_console_only_and_metrics_keep_every_epoch(tmp_path, capsys) -> None:
+def test_fraction_of_epoch_count_controls_progress_and_keeps_full_history(tmp_path, capsys) -> None:
     import json
 
     from boundary_pinn.problems.committor.training import (
@@ -1006,13 +1006,13 @@ def test_wall_clock_controls_console_only_and_metrics_keep_every_epoch(tmp_path,
             "initialization": "xavier_normal",
         },
         training={
-            "epochs": 3,
+            "epochs": 4,
             "collocation_points": 8,
             "learning_rate": 1e-3,
             "optimizer": {"name": "adam"},
             "scheduler": {"name": "constant"},
-            "checkpoint_every": 3,
-            "log_interval_seconds": 3600,
+            "checkpoint_every": 4,
+            "report_fraction": 0.5,
         },
     )
     run_periodic_committor(config, tmp_path / "run")
@@ -1022,11 +1022,12 @@ def test_wall_clock_controls_console_only_and_metrics_keep_every_epoch(tmp_path,
         for line in (tmp_path / "run" / "metrics.jsonl").read_text().splitlines()
         if line.strip()
     ]
-    assert [record["epoch"] for record in records] == [1, 2, 3]
+    assert [record["epoch"] for record in records] == [1, 2, 3, 4]
     output = capsys.readouterr().out
-    assert "epoch 1/3" in output
-    assert "epoch 2/3" not in output
-    assert "epoch 3/3" in output
+    assert "epoch 1/4" in output
+    assert "epoch 2/4" in output
+    assert "epoch 3/4" not in output
+    assert "epoch 4/4" in output
 
 
 def test_custom_training_step_can_stop_after_a_durable_epoch(tmp_path) -> None:
@@ -1110,6 +1111,7 @@ def test_comparison_settings_reject_silent_or_incomplete_controls() -> None:
             "epochs": 2,
             "collocation_points": 8,
             "learning_rate": 1e-3,
+            "report_fraction": 0.1,
             "scheduler": {
                 "name": "step",
                 "step_size_epochs": 1,
@@ -1119,6 +1121,12 @@ def test_comparison_settings_reject_silent_or_incomplete_controls() -> None:
         "reference_grid_sizes": [32, 64],
     }
     _validate_comparison_config(valid)
+
+    invalid_report_fraction = {
+        **valid, "training": {**valid["training"], "report_fraction": 1.1}
+    }
+    with pytest.raises(ValueError, match="report_fraction"):
+        _validate_comparison_config(invalid_report_fraction)
 
     typo = {**valid, "training": {**valid["training"], "log_intervel_seconds": 10}}
     with pytest.raises(ValueError, match="Unknown training setting"):
