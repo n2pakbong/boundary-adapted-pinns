@@ -16,33 +16,60 @@ NOTEBOOKS = [
 
 
 REPLACEMENTS = {
-    "SAVE_TO_DRIVE = True": "SAVE_TO_DRIVE = False",
-    "RUN_TRAINING = False": "RUN_TRAINING = True",
-    "pool_size, batch_size, adam_epochs = 512, 128, 40": "pool_size, batch_size, adam_epochs = 32, 8, 1",
-    "data_anchors, paths_per_anchor = 24, 24": "data_anchors, paths_per_anchor = 3, 3",
-    "mc_dt, mc_max_time = 5e-3, 2.0": "mc_dt, mc_max_time = 0.02, 0.04",
-    "pool_size, batch_size, adam_epochs = 384, 96, 30": "pool_size, batch_size, adam_epochs = 32, 8, 1",
-    "data_anchors, paths_per_anchor = 20, 20": "data_anchors, paths_per_anchor = 3, 3",
-    "mc_dt, mc_max_time = 2e-3, 2.0": "mc_dt, mc_max_time = 0.02, 0.04",
-    "fem_refinements = 4": "fem_refinements = 2",
-    "collocation_count, batch_size = 512, 128": "collocation_count, batch_size = 32, 8",
-    "adam_epochs, number_of_decays = 40, 20": "adam_epochs, number_of_decays = 1, 1",
-    "mc_anchors, mc_paths, mc_dt, mc_max_time = 20, 32, 2e-3, 5.0": "mc_anchors, mc_paths, mc_dt, mc_max_time = 3, 3, 0.02, 0.04",
-    "grid_n = 200": "grid_n = 24",
-    "grid_n = 180": "grid_n = 24",
+    # OU disk
+    "training_collocation_points = 512": "training_collocation_points = 32",
+    "training_boundary_points = 128": "training_boundary_points = 16",
+    "evaluation_interior_points = 512": "evaluation_interior_points = 32",
+    "evaluation_boundary_points = 128": "evaluation_boundary_points = 16",
     "reference_grid_n = 200": "reference_grid_n = 24",
+    "data_anchors = 24": "data_anchors = 3",
+    "paths_per_anchor = 24": "paths_per_anchor = 3",
+    "mc_dt = 5e-3": "mc_dt = 0.02",
+    "mc_max_time = 2.0": "mc_max_time = 0.04",
+    "trajectory_dt = 1e-3": "trajectory_dt = 0.02",
+    "trajectory_max_time = 20.0": "trajectory_max_time = 0.04",
+    # Double-well ellipse
+    "training_collocation_points = 384": "training_collocation_points = 32",
+    "training_boundary_points = 96": "training_boundary_points = 16",
+    "evaluation_interior_points = 384": "evaluation_interior_points = 32",
+    "evaluation_boundary_points = 96": "evaluation_boundary_points = 16",
+    "data_anchors = 20": "data_anchors = 3",
+    "paths_per_anchor = 20": "paths_per_anchor = 3",
+    "mc_dt = 2e-3": "mc_dt = 0.02",
+    "fem_refinements = 4": "fem_refinements = 2",
+    "adam_epochs = 30": "adam_epochs = 1",
     "evaluation_grid_n = 200": "evaluation_grid_n = 24",
+    # Duffing disk
+    "training_collocation_count = 512": "training_collocation_count = 32",
+    "training_boundary_count = 128": "training_boundary_count = 16",
+    "evaluation_interior_count = 512": "evaluation_interior_count = 32",
+    "evaluation_boundary_count = 128": "evaluation_boundary_count = 16",
+    "lbfgs_interior_count = 512": "lbfgs_interior_count = 32",
+    "lbfgs_boundary_count = 128": "lbfgs_boundary_count = 16",
+    "mc_anchors = 20": "mc_anchors = 3",
+    "mc_paths = 32": "mc_paths = 3",
+    "mc_max_time = 5.0": "mc_max_time = 0.04",
+    "adam_epochs = 40": "adam_epochs = 1",
+    "n_test_functions = 50": "n_test_functions = 8",
     "evaluation_grid_n = 180": "evaluation_grid_n = 24",
+    "trajectory_max_time = 5.0": "trajectory_max_time = 0.04",
 }
 
 
 def patched_notebook(path):
     notebook = nbformat.read(path, as_version=4)
+    replacements_applied = 0
     for cell in notebook.cells:
         if cell.cell_type != "code":
             continue
         for old, new in REPLACEMENTS.items():
+            replacements_applied += cell.source.count(old)
             cell.source = cell.source.replace(old, new)
+    if replacements_applied < 8:
+        raise AssertionError(
+            "Tiny smoke-test settings did not match this notebook; "
+            f"only {replacements_applied} setting overrides were applied."
+        )
     return notebook
 
 
@@ -80,14 +107,35 @@ def test_public_notebook_executes_with_tiny_settings(path, tmp_path, monkeypatch
             } <= set(shared.files)
     else:
         record_path = next(tmp_path.rglob("run_manifest.json"))
-        arrays_path = record_path.parent / "evaluation_field.npz"
+        arrays_path = record_path.parent / "numerical_results.npz"
         required = {
-            "gx", "gy", "points", "mask", "field", "anchors", "prediction",
-            "reference", "censored_fraction", "signed_anchor_error",
-            "absolute_anchor_error",
+            "gx", "gy", "grid_points", "disk_mask",
+            "monte_carlo_anchors", "monte_carlo_exit_times",
+            "monte_carlo_censored_fraction", "training_interior",
+            "training_boundary", "evaluation_interior", "evaluation_boundary",
+            "lbfgs_interior", "lbfgs_boundary", "test_centers",
+            "training_seed", "monte_carlo_seed",
         }
+        methods = {"standard", "adapted", "over", "under", "variational"}
+        required.update(
+            key
+            for method in methods
+            for key in (
+                f"prediction_{method}",
+                f"anchor_prediction_{method}",
+                f"signed_anchor_error_{method}",
+                f"absolute_anchor_error_{method}",
+                f"training_{method}_epoch",
+            )
+        )
         with np.load(record_path.parent / "training_points.npz", allow_pickle=False) as points:
-            assert {"collocation", "evaluation", "training_seed", "monte_carlo_seed"} <= set(points.files)
+            assert {
+                "collocation", "evaluation", "label_points", "label_values",
+                "label_censored_fraction", "training_interior", "training_boundary",
+                "evaluation_interior", "evaluation_boundary", "lbfgs_interior",
+                "lbfgs_boundary", "test_centers", "training_seed",
+                "monte_carlo_seed",
+            } <= set(points.files)
 
     record = json.loads(record_path.read_text(encoding="utf-8"))
     assert record["schema_version"] == 2
@@ -99,8 +147,9 @@ def test_public_notebook_executes_with_tiny_settings(path, tmp_path, monkeypatch
     assert str(arrays_path.relative_to(record_path.parent)) in record["artifacts"]
     with np.load(arrays_path, allow_pickle=False) as arrays:
         assert required <= set(arrays.files)
+        methods = record.get("methods", record.get("settings", {}).get("methods", []))
+        assert set(methods) == {"standard", "adapted", "over", "under", "variational"}
         if path.name != "duffing_mean_escape_time.ipynb":
-            methods = record.get("methods", record.get("settings", {}).get("methods", []))
             for method in methods:
                 assert f"prediction_{method}" in arrays.files
                 assert f"signed_error_{method}" in arrays.files
