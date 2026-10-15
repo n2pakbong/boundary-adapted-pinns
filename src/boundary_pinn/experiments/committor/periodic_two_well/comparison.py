@@ -226,13 +226,21 @@ def _evaluate(
     """Evaluate a network on a reference grid without retaining derivatives."""
 
     points = reference.grid.reshape(-1, 2)
-    values: list[np.ndarray] = []
+    domain_indices = np.flatnonzero(reference.domain.reshape(-1))
+    prediction = np.zeros(reference.values.size, dtype=np.float64)
+    prediction[reference.target.reshape(-1)] = 1.0
+    model_values: list[np.ndarray] = []
     model.eval()
     with torch.no_grad():
-        for start in range(0, len(points), batch_size):
-            batch = torch.as_tensor(points[start : start + batch_size], device=device, dtype=dtype)
-            values.append(model(batch).detach().cpu().numpy())
-    return np.concatenate(values).reshape(reference.values.shape)
+        for start in range(0, len(domain_indices), batch_size):
+            indices = domain_indices[start : start + batch_size]
+            batch = torch.as_tensor(points[indices], device=device, dtype=dtype)
+            model_values.append(
+                model(batch).detach().cpu().numpy().reshape(-1)
+            )
+    if model_values:
+        prediction[domain_indices] = np.concatenate(model_values)
+    return prediction.reshape(reference.values.shape)
 
 
 def _boundary_rmse(
