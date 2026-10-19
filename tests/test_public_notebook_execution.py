@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import json
+import re
 import nbformat
 import numpy as np
 import pytest
@@ -15,61 +16,73 @@ NOTEBOOKS = [
 ]
 
 
-REPLACEMENTS = {
-    # OU disk
-    "training_collocation_points = 512": "training_collocation_points = 32",
-    "training_boundary_points = 128": "training_boundary_points = 16",
-    "evaluation_interior_points = 512": "evaluation_interior_points = 32",
-    "evaluation_boundary_points = 128": "evaluation_boundary_points = 16",
-    "reference_grid_n = 200": "reference_grid_n = 24",
-    "data_anchors = 24": "data_anchors = 3",
-    "paths_per_anchor = 24": "paths_per_anchor = 3",
-    "mc_dt = 5e-3": "mc_dt = 0.02",
-    "mc_max_time = 2.0": "mc_max_time = 0.04",
-    "trajectory_dt = 1e-3": "trajectory_dt = 0.02",
-    "trajectory_max_time = 20.0": "trajectory_max_time = 0.04",
-    # Double-well ellipse
-    "training_collocation_points = 384": "training_collocation_points = 32",
-    "training_boundary_points = 96": "training_boundary_points = 16",
-    "evaluation_interior_points = 384": "evaluation_interior_points = 32",
-    "evaluation_boundary_points = 96": "evaluation_boundary_points = 16",
-    "data_anchors = 20": "data_anchors = 3",
-    "paths_per_anchor = 20": "paths_per_anchor = 3",
-    "mc_dt = 2e-3": "mc_dt = 0.02",
-    "fem_refinements = 4": "fem_refinements = 2",
-    "adam_epochs = 30": "adam_epochs = 1",
-    "evaluation_grid_n = 200": "evaluation_grid_n = 24",
-    # Duffing disk
-    "training_collocation_count = 512": "training_collocation_count = 32",
-    "training_boundary_count = 128": "training_boundary_count = 16",
-    "evaluation_interior_count = 512": "evaluation_interior_count = 32",
-    "evaluation_boundary_count = 128": "evaluation_boundary_count = 16",
-    "lbfgs_interior_count = 512": "lbfgs_interior_count = 32",
-    "lbfgs_boundary_count = 128": "lbfgs_boundary_count = 16",
-    "mc_anchors = 20": "mc_anchors = 3",
-    "mc_paths = 32": "mc_paths = 3",
-    "mc_max_time = 5.0": "mc_max_time = 0.04",
-    "adam_epochs = 40": "adam_epochs = 1",
-    "n_test_functions = 50": "n_test_functions = 8",
-    "evaluation_grid_n = 180": "evaluation_grid_n = 24",
-    "trajectory_max_time = 5.0": "trajectory_max_time = 0.04",
+TINY_SETTINGS = {
+    "ou_mean_escape_time.ipynb": {
+        "training_collocation_points": "32",
+        "training_boundary_points": "16",
+        "evaluation_interior_points": "32",
+        "evaluation_boundary_points": "16",
+        "reference_grid_n": "24",
+        "data_anchor_fraction": "3 / 32",
+        "paths_per_anchor": "3",
+        "mc_dt": "0.02",
+        "mc_max_time": "0.04",
+        "adam_epochs": "1",
+        "n_test_functions": "8",
+        "trajectory_dt": "0.02",
+        "trajectory_max_time": "0.04",
+    },
+    "double_well_mean_escape_time.ipynb": {
+        "training_collocation_points": "32",
+        "training_boundary_points": "16",
+        "evaluation_interior_points": "32",
+        "evaluation_boundary_points": "16",
+        "evaluation_grid_n": "24",
+        "data_anchor_fraction": "3 / 32",
+        "paths_per_anchor": "3",
+        "mc_dt": "0.02",
+        "mc_max_time": "0.04",
+        "fem_refinements": "2",
+        "adam_epochs": "1",
+        "n_test_functions": "8",
+        "trajectory_dt": "0.02",
+        "trajectory_max_time": "0.04",
+    },
+    "duffing_mean_escape_time.ipynb": {
+        "training_collocation_count": "32",
+        "training_boundary_count": "16",
+        "evaluation_interior_count": "32",
+        "evaluation_boundary_count": "16",
+        "lbfgs_interior_count": "32",
+        "lbfgs_boundary_count": "16",
+        "mc_anchor_fraction": "3 / 32",
+        "mc_paths": "3",
+        "mc_dt": "0.02",
+        "mc_max_time": "0.04",
+        "adam_epochs": "1",
+        "n_test_functions": "8",
+        "evaluation_grid_n": "24",
+        "trajectory_dt": "0.02",
+        "trajectory_max_time": "0.04",
+    },
 }
 
 
 def patched_notebook(path):
     notebook = nbformat.read(path, as_version=4)
-    replacements_applied = 0
-    for cell in notebook.cells:
-        if cell.cell_type != "code":
-            continue
-        for old, new in REPLACEMENTS.items():
-            replacements_applied += cell.source.count(old)
-            cell.source = cell.source.replace(old, new)
-    if replacements_applied < 8:
-        raise AssertionError(
-            "Tiny smoke-test settings did not match this notebook; "
-            f"only {replacements_applied} setting overrides were applied."
-        )
+    overrides = TINY_SETTINGS[path.name]
+    for name, value in overrides.items():
+        pattern = re.compile(rf"(?m)^([ \\t]*{re.escape(name)}[ \\t]*=[ \\t]*).*$")
+        matches = 0
+        for cell in notebook.cells:
+            if cell.cell_type != "code":
+                continue
+            cell.source, count = pattern.subn(lambda match: match.group(1) + value, cell.source)
+            matches += count
+        if matches != 1:
+            raise AssertionError(
+                f"Expected one editable setting named {name!r} in {path.name}; found {matches}."
+            )
     return notebook
 
 
