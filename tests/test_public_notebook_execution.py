@@ -72,7 +72,7 @@ def patched_notebook(path):
     notebook = nbformat.read(path, as_version=4)
     overrides = TINY_SETTINGS[path.name]
     for name, value in overrides.items():
-        pattern = re.compile(rf"(?m)^([ \\t]*{re.escape(name)}[ \\t]*=[ \\t]*).*$")
+        pattern = re.compile(rf"(?m)^([ ]*{re.escape(name)} *= *).*$")
         matches = 0
         for cell in notebook.cells:
             if cell.cell_type != "code":
