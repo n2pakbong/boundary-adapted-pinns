@@ -13,7 +13,7 @@ If you use the method or the experiments, please cite the paper:
 ```bibtex
 @misc{tepakbong2026boundary,
   author = {Tepakbong, Nathanael and Fan, Jun and Zhou, Xiang and Zhou, Ding-Xuan},
-  title = {{Boundary-Adapted PINNs for Elliptic Dirichlet Problems: $H^2(\Omega)$ A Priori Error Bounds with Application to Mean Escape Time Computation}},
+  title = {{$H^2(\Omega)$ A Priori Error Bounds for Boundary-Adapted PINNs Solving Elliptic Dirichlet Problems}},
   year = {2026},
   eprint = {2607.19167},
   archivePrefix = {arXiv},
